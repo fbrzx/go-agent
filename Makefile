@@ -6,8 +6,9 @@ BINARY := go-agent
 TRAIN_ARGS ?=
 CHAT_ARGS ?=
 CLEAR_ARGS ?=
+SERVE_ARGS ?=
 
-.PHONY: test build train chat clear
+.PHONY: test build train chat clear serve
 
 ## test: Run Go tests under ./tests. Set INCLUDE_INTEGRATION=1 to enable integration checks.
 test:
@@ -57,3 +58,11 @@ clear:
 	   ARGS="$(CLEAR_ARGS)"; \
 	   if [ "$(CONFIRM)" = "1" ]; then ARGS="--confirm $$ARGS"; fi; \
 	   go run . clear $$ARGS )
+
+## serve: Start the HTTP API that exposes train/chat/clear via OpenAPI.
+serve:
+	@echo "Starting $(BINARY) HTTP API"
+	@( set -a; \
+	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
+	   set +a; \
+	   go run . serve $(SERVE_ARGS) )

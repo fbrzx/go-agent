@@ -1,0 +1,291 @@
+openapi: 3.0.3
+info:
+  title: go-agent API
+  version: 1.0.0
+  description: |
+    HTTP layer exposing the existing go-agent workflows (ingest, chat, clear)
+    as JSON endpoints.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      operationId: healthz
+      responses:
+        '200':
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '405':
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /openapi.yaml:
+    get:
+      summary: Download the OpenAPI document
+      operationId: openapiDocument
+      responses:
+        '200':
+          description: OpenAPI specification in YAML format.
+          content:
+            application/yaml:
+              schema:
+                type: string
+        '405':
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/ingest:
+    post:
+      summary: Ingest markdown documents from disk.
+      operationId: ingestDocuments
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '200':
+          description: Ingestion completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Ingestion failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/chat:
+    post:
+      summary: Ask the agent a question using previously ingested knowledge.
+      operationId: chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat answer and supporting sources.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          description: The question is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Chat workflow failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/clear:
+    post:
+      summary: Clear ingested RAG data from Postgres and Neo4j.
+      operationId: clearData
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClearRequest'
+      responses:
+        '200':
+          description: Data deleted successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Confirmation flag missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Delete operation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    MessageResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        message:
+          type: string
+      required:
+        - message
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+      required:
+        - error
+    IngestRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        dir:
+          type: string
+          description: Optional override for the documents directory. Defaults to DATA_DIR.
+    ChatRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        question:
+          type: string
+          description: Natural language question for the agent.
+        limit:
+          type: integer
+          minimum: 1
+          default: 5
+          description: Maximum number of similar chunks to retrieve.
+        sections:
+          type: array
+          items:
+            type: string
+          description: Optional section filters.
+        topics:
+          type: array
+          items:
+            type: string
+          description: Optional topic filters.
+      required:
+        - question
+    ChatResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatSource'
+      required:
+        - answer
+        - sources
+    ChatSource:
+      type: object
+      additionalProperties: false
+      properties:
+        documentId:
+          type: string
+        title:
+          type: string
+        path:
+          type: string
+        snippet:
+          type: string
+        score:
+          type: number
+          format: double
+        insight:
+          $ref: '#/components/schemas/ChatDocumentInsight'
+      required:
+        - documentId
+        - title
+        - path
+        - snippet
+        - score
+        - insight
+    ChatDocumentInsight:
+      type: object
+      additionalProperties: false
+      properties:
+        chunkCount:
+          type: integer
+        folders:
+          type: array
+          items:
+            type: string
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatSectionInfo'
+        topics:
+          type: array
+          items:
+            type: string
+        relatedDocuments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatRelatedDocument'
+      required:
+        - chunkCount
+        - folders
+        - sections
+        - topics
+        - relatedDocuments
+    ChatSectionInfo:
+      type: object
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+        level:
+          type: integer
+        order:
+          type: integer
+      required:
+        - title
+        - level
+        - order
+    ChatRelatedDocument:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        path:
+          type: string
+        weight:
+          type: number
+          format: double
+        similarity:
+          type: number
+          format: double
+        reason:
+          type: string
+      required:
+        - id
+        - title
+        - path
+    ClearRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        confirm:
+          type: boolean
+          const: true
+          description: Must be set to true to acknowledge the destructive action.
+      required:
+        - confirm

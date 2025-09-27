@@ -22,6 +22,14 @@ type Client interface {
 	Generate(ctx context.Context, messages []Message) (string, error)
 }
 
+// StreamClient extends Client with streaming support.
+// Implementations should invoke the callback with incremental chunks as they
+// are produced, returning early if the callback reports an error.
+type StreamClient interface {
+	Client
+	GenerateStream(ctx context.Context, messages []Message, fn func(string) error) error
+}
+
 type Options struct {
 	Provider string
 	Model    string

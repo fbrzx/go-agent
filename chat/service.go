@@ -44,18 +44,44 @@ func NewService(vectors VectorStore, graph GraphStore, embedder embeddings.Embed
 }
 
 func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Response, error) {
+	resp, _, err := s.chat(ctx, question, cfg, nil, nil)
+	return resp, err
+}
+
+// ChatStream runs the chat workflow while optionally streaming the LLM output.
+// The provided history slice contains prior conversation turns (excluding the
+// system prompt) and will be extended with the latest user/assistant messages on
+// success. When the LLM implementation does not support streaming, the callback
+// receives the full answer once.
+func (s *Service) ChatStream(
+	ctx context.Context,
+	question string,
+	cfg Config,
+	history []llm.Message,
+	streamFn func(string) error,
+) (Response, []llm.Message, error) {
+	return s.chat(ctx, question, cfg, history, streamFn)
+}
+
+func (s *Service) chat(
+	ctx context.Context,
+	question string,
+	cfg Config,
+	history []llm.Message,
+	streamFn func(string) error,
+) (Response, []llm.Message, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
-		return Response{}, fmt.Errorf("question cannot be empty")
+		return Response{}, nil, fmt.Errorf("question cannot be empty")
 	}
 	if s.embedder == nil {
-		return Response{}, fmt.Errorf("embedder is not configured")
+		return Response{}, nil, fmt.Errorf("embedder is not configured")
 	}
 	if s.vectors == nil {
-		return Response{}, fmt.Errorf("vector store is not configured")
+		return Response{}, nil, fmt.Errorf("vector store is not configured")
 	}
 	if s.llm == nil {
-		return Response{}, fmt.Errorf("llm client is not configured")
+		return Response{}, nil, fmt.Errorf("llm client is not configured")
 	}
 
 	limit := cfg.SimilarityLimit
@@ -65,15 +91,15 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 
 	embeddings, err := s.embedder.Embed(ctx, []string{question})
 	if err != nil {
-		return Response{}, fmt.Errorf("embed question: %w", err)
+		return Response{}, nil, fmt.Errorf("embed question: %w", err)
 	}
 	if len(embeddings) == 0 {
-		return Response{}, fmt.Errorf("embedder returned no vectors")
+		return Response{}, nil, fmt.Errorf("embedder returned no vectors")
 	}
 
 	chunks, err := s.vectors.SimilarChunks(ctx, embeddings[0], limit)
 	if err != nil {
-		return Response{}, fmt.Errorf("vector search: %w", err)
+		return Response{}, nil, fmt.Errorf("vector search: %w", err)
 	}
 
 	ctxEmpty := len(chunks) == 0
@@ -85,7 +111,7 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 	if len(cfg.SectionFilters) > 0 && !ctxEmpty {
 		filtered := filterChunksBySections(chunks, cfg.SectionFilters)
 		if len(filtered) == 0 {
-			return Response{}, fmt.Errorf("no chunks matched the requested sections")
+			return Response{}, nil, fmt.Errorf("no chunks matched the requested sections")
 		}
 		chunks = filtered
 	}
@@ -109,7 +135,7 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 	if len(cfg.TopicFilters) > 0 && len(sources) > 0 {
 		filteredSources := filterSourcesByTopics(sources, cfg.TopicFilters)
 		if len(filteredSources) == 0 {
-			return Response{}, fmt.Errorf("no documents matched the requested topics")
+			return Response{}, nil, fmt.Errorf("no documents matched the requested topics")
 		}
 		sources = filteredSources
 	}
@@ -119,17 +145,57 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 		contextPrompt = buildContextPrompt(sources)
 	}
 
-	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: systemPrompt()},
-		{Role: llm.RoleUser, Content: formatUserPrompt(question, contextPrompt)},
+	messages := make([]llm.Message, 0, len(history)+2)
+	messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: systemPrompt()})
+	if len(history) > 0 {
+		messages = append(messages, history...)
+	}
+	userMessage := llm.Message{Role: llm.RoleUser, Content: formatUserPrompt(question, contextPrompt)}
+	messages = append(messages, userMessage)
+
+	var answer string
+	if streamFn != nil {
+		if streamClient, ok := s.llm.(llm.StreamClient); ok {
+			var builder strings.Builder
+			streamErr := streamClient.GenerateStream(ctx, messages, func(chunk string) error {
+				if chunk == "" {
+					return nil
+				}
+				builder.WriteString(chunk)
+				return streamFn(chunk)
+			})
+			if streamErr != nil {
+				return Response{}, nil, fmt.Errorf("llm stream generate: %w", streamErr)
+			}
+			answer = builder.String()
+		} else {
+			generated, genErr := s.llm.Generate(ctx, messages)
+			if genErr != nil {
+				return Response{}, nil, fmt.Errorf("llm generate: %w", genErr)
+			}
+			answer = generated
+			if err := streamFn(answer); err != nil {
+				return Response{}, nil, err
+			}
+		}
+	} else {
+		generated, genErr := s.llm.Generate(ctx, messages)
+		if genErr != nil {
+			return Response{}, nil, fmt.Errorf("llm generate: %w", genErr)
+		}
+		answer = generated
 	}
 
-	answer, err := s.llm.Generate(ctx, messages)
-	if err != nil {
-		return Response{}, fmt.Errorf("llm generate: %w", err)
-	}
+	answer = strings.TrimSpace(answer)
+	assistantMessage := llm.Message{Role: llm.RoleAssistant, Content: answer}
 
-	return Response{Answer: strings.TrimSpace(answer), Sources: sources}, nil
+	updatedHistory := make([]llm.Message, 0, len(history)+2)
+	if len(history) > 0 {
+		updatedHistory = append(updatedHistory, history...)
+	}
+	updatedHistory = append(updatedHistory, userMessage, assistantMessage)
+
+	return Response{Answer: answer, Sources: sources}, updatedHistory, nil
 }
 
 func mergeSources(chunks []ChunkResult, insights map[string]DocumentInsight) []Source {

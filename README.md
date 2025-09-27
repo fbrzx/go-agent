@@ -54,7 +54,7 @@ set +a
    ```sh
    make chat CHAT_ARGS="--question 'What is our adoption strategy?'"
    ```
-   Omit `--question` to be prompted interactively. Use `--limit` to adjust how many chunks feed the answer. Add repeated `--topics` or `--sections` flags to constrain the response context:
+   Omit `--question` to open an interactive session where replies stream token-by-token and each follow-up keeps the full conversation context. Use `--limit` to adjust how many chunks feed the answer. Add repeated `--topics` or `--sections` flags to constrain the response context:
    ```sh
    make chat CHAT_ARGS="--question 'Summarise adoption' --topics adoption --topics onboarding --sections introduction"
    ```
@@ -79,6 +79,21 @@ Behind the scenes the command:
 - `make clear` – wipe Postgres tables and Neo4j graph (`CONFIRM=1` to bypass the prompt).
 - `make test` – run unit tests (set `INCLUDE_INTEGRATION=1` to exercise live DB connectivity).
 - `make build` – refresh modules and build `bin/go-agent`.
+- `make serve` – launch the HTTP API that mirrors `train`, `chat`, and `clear` via OpenAPI.
+
+## HTTP API
+
+Run `make serve` (or `go run . serve --addr :9090`) to start the JSON API. It exposes the same
+workflows as the CLI (existing `make` targets continue to run the local commands directly):
+
+- `POST /v1/ingest` – trigger ingestion (optional body `{ "dir": "./other/docs" }`).
+- `POST /v1/chat` – ask a question with body `{ "question": "...", "limit": 5 }` and optional section/topic filters.
+- `POST /v1/clear` – clear persisted data; requires `{ "confirm": true }`.
+- `GET /healthz` – lightweight readiness probe.
+- `GET /openapi.yaml` – download the full OpenAPI 3.0 contract.
+
+Responses include detailed error payloads and source metadata identical to the CLI output. See
+`api/openapi.yaml` for the authoritative schema.
 
 ## Project Layout
 
