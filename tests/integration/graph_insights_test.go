@@ -94,6 +94,12 @@ func TestGraphInsightsIncludesFoldersAndRelatedDocs(t *testing.T) {
 	if len(info.RelatedDocuments) == 0 || info.RelatedDocuments[0].ID != docB {
 		t.Fatalf("expected related document %s, got %#v", docB, info.RelatedDocuments)
 	}
+	if info.RelatedDocuments[0].Weight <= 0 {
+		t.Fatalf("expected related weight > 0, got %f", info.RelatedDocuments[0].Weight)
+	}
+	if info.RelatedDocuments[0].Reason == "" {
+		t.Fatalf("expected related reason, got empty")
+	}
 
 	if len(info.Sections) == 0 || info.Sections[0].Title != sectionA.Title {
 		t.Fatalf("expected section %s, got %#v", sectionA.Title, info.Sections)

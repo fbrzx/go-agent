@@ -81,19 +81,21 @@ func TestChatServiceReturnsAnswer(t *testing.T) {
 	svc := chat.NewService(
 		&stubVectorStore{results: []chat.ChunkResult{
 			{
-				ChunkID:    "chunk-1",
-				DocumentID: "doc-1",
-				Title:      "Doc One",
-				Path:       "doc1.md",
-				Content:    "This is a relevant paragraph about adoption.",
-				Score:      0.9,
+				ChunkID:      "chunk-1",
+				DocumentID:   "doc-1",
+				Title:        "Doc One",
+				Path:         "doc1.md",
+				Content:      "This is a relevant paragraph about adoption.",
+				Score:        0.9,
+				SectionTitle: "Section A",
+				SectionOrder: 1,
 			},
 		}},
 		&stubGraphStore{data: map[string]chat.DocumentInsight{
 			"doc-1": {
 				ChunkCount:       4,
 				Folders:          []string{"knowledge"},
-				RelatedDocuments: []chat.RelatedDocument{{ID: "doc-2", Title: "Doc Two", Path: "doc2.md"}},
+				RelatedDocuments: []chat.RelatedDocument{{ID: "doc-2", Title: "Doc Two", Path: "doc2.md", Weight: 2, Reason: "topic"}},
 				Sections:         []chat.SectionInfo{{Title: "Section A", Level: 2, Order: 1}},
 				Topics:           []string{"Topic A"},
 			},
@@ -152,5 +154,69 @@ func TestChatServiceHandlesNoResults(t *testing.T) {
 
 	if _, err := svc.Chat(context.Background(), "question", chat.Config{}); err == nil {
 		t.Fatal("expected error when no context is found")
+	}
+}
+
+func TestChatServiceSectionFilter(t *testing.T) {
+	svc := chat.NewService(
+		&stubVectorStore{results: []chat.ChunkResult{{
+			ChunkID:      "chunk-1",
+			DocumentID:   "doc-1",
+			Title:        "Doc One",
+			Path:         "doc1.md",
+			Content:      "Paragraph",
+			Score:        0.9,
+			SectionTitle: "Overview",
+			SectionOrder: 1,
+		}}},
+		&stubGraphStore{data: map[string]chat.DocumentInsight{
+			"doc-1": {
+				ChunkCount: 1,
+				Topics:     []string{"Topic"},
+			},
+		}},
+		&stubEmbedder{vectors: [][]float32{{0.1}}},
+		&stubLLM{answer: "ok"},
+		log.New(io.Discard, "", 0),
+	)
+
+	if _, err := svc.Chat(context.Background(), "question", chat.Config{SectionFilters: []string{"overview"}}); err != nil {
+		t.Fatalf("expected section filter to pass, got %v", err)
+	}
+
+	if _, err := svc.Chat(context.Background(), "question", chat.Config{SectionFilters: []string{"detail"}}); err == nil {
+		t.Fatal("expected error when section filter does not match")
+	}
+}
+
+func TestChatServiceTopicFilter(t *testing.T) {
+	svc := chat.NewService(
+		&stubVectorStore{results: []chat.ChunkResult{{
+			ChunkID:      "chunk-1",
+			DocumentID:   "doc-1",
+			Title:        "Doc One",
+			Path:         "doc1.md",
+			Content:      "Paragraph",
+			Score:        0.9,
+			SectionTitle: "Overview",
+			SectionOrder: 1,
+		}}},
+		&stubGraphStore{data: map[string]chat.DocumentInsight{
+			"doc-1": {
+				ChunkCount: 1,
+				Topics:     []string{"Topic"},
+			},
+		}},
+		&stubEmbedder{vectors: [][]float32{{0.1}}},
+		&stubLLM{answer: "ok"},
+		log.New(io.Discard, "", 0),
+	)
+
+	if _, err := svc.Chat(context.Background(), "question", chat.Config{TopicFilters: []string{"topic"}}); err != nil {
+		t.Fatalf("expected topic filter to pass, got %v", err)
+	}
+
+	if _, err := svc.Chat(context.Background(), "question", chat.Config{TopicFilters: []string{"other"}}); err == nil {
+		t.Fatal("expected error when topic filter does not match")
 	}
 }

@@ -54,7 +54,10 @@ set +a
    ```sh
    make run CHAT_ARGS="--question 'What is our adoption strategy?'"
    ```
-   Omit `--question` to be prompted interactively. Use `--limit` to adjust how many chunks feed the answer.
+   Omit `--question` to be prompted interactively. Use `--limit` to adjust how many chunks feed the answer. Add `--topics` or `--sections` (comma-separated) to constrain the response context:
+   ```sh
+   make run CHAT_ARGS="--question 'Summarise adoption' --topics adoption,onboarding --sections introduction"
+   ```
 5. Clear previously ingested data (requires confirmation):
    ```sh
    make clear

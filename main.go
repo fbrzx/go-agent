@@ -83,6 +83,8 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 	flags := flag.NewFlagSet("chat", flag.ExitOnError)
 	question := flags.String("question", "", "question to ask the agent")
 	limit := flags.Int("limit", 5, "number of context chunks to retrieve")
+	sectionFilter := flags.String("sections", "", "comma-separated section titles or numbers to filter context")
+	topicFilter := flags.String("topics", "", "comma-separated topic names to filter context")
 	if err := flags.Parse(args); err != nil {
 		logger.Fatalf("parse chat flags: %v", err)
 	}
@@ -127,7 +129,11 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 	graphStore := chat.NewNeo4jGraphStore(neo4jDriver)
 	svc := chat.NewService(vectorStore, graphStore, embedder, llmClient, logger)
 
-	resp, err := svc.Chat(ctx, *question, chat.Config{SimilarityLimit: *limit})
+	resp, err := svc.Chat(ctx, *question, chat.Config{
+		SimilarityLimit: *limit,
+		SectionFilters:  parseCSVList(*sectionFilter),
+		TopicFilters:    parseCSVList(*topicFilter),
+	})
 	if err != nil {
 		logger.Fatalf("chat failed: %v", err)
 	}
@@ -162,7 +168,14 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 			if len(source.Insight.RelatedDocuments) > 0 {
 				fmt.Println("   Related documents:")
 				for _, related := range source.Insight.RelatedDocuments {
-					fmt.Printf("     - %s (%s)\n", related.Title, related.Path)
+					extra := ""
+					if related.Weight > 0 {
+						extra += fmt.Sprintf(" weight %.2f", related.Weight)
+					}
+					if related.Reason != "" {
+						extra += fmt.Sprintf(" via %s", related.Reason)
+					}
+					fmt.Printf("     - %s (%s)%s\n", related.Title, related.Path, extra)
 				}
 			}
 		}
@@ -249,4 +262,20 @@ func printUsage() {
 	fmt.Println("  ingest   Ingest markdown documents into Postgres/Neo4j (use --dir to override data directory)")
 	fmt.Println("  chat     Query the agent using the ingested knowledge base")
 	fmt.Println("  clear    Remove ingested data from Postgres/Neo4j")
+}
+
+func parseCSVList(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

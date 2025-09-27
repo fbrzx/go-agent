@@ -153,9 +153,17 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 		}
 
 		if _, err := tx.Run(ctx, `
-			MATCH (d:Document {id: $id})-[:HAS_TOPIC]->(t:Topic)<-[:HAS_TOPIC]-(other:Document)
+			MATCH (d:Document {id: $id})
+			OPTIONAL MATCH (d)-[:HAS_TOPIC]->(docTopic:Topic)
+			WITH d, [topic IN collect(docTopic) WHERE topic IS NOT NULL] AS docTopics
+			UNWIND docTopics AS dt
+			MATCH (dt)<-[:HAS_TOPIC]-(other:Document)
 			WHERE other.id <> d.id
-			MERGE (d)-[:RELATED_TOPIC {name: t.name}]->(other)
+			WITH d, docTopics, other, collect(DISTINCT dt.name) AS sharedTopics
+			MERGE (d)-[rel:RELATED_TOPIC]->(other)
+			SET rel.names = sharedTopics,
+			    rel.weight = toFloat(size(sharedTopics)),
+			    rel.score = CASE WHEN size(docTopics) = 0 THEN 0 ELSE toFloat(size(sharedTopics)) / toFloat(size(docTopics)) END
 		`, map[string]any{"id": doc.ID}); err != nil {
 			return nil, fmt.Errorf("link related topics: %w", err)
 		}

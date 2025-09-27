@@ -34,15 +34,15 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		MATCH (d:Document)
 		WHERE d.id IN $ids
 		OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
-		OPTIONAL MATCH (d)-[:IN_FOLDER]->(folder:Folder)
-		OPTIONAL MATCH (folder)<-[:IN_FOLDER]-(related:Document)
-		OPTIONAL MATCH (d)-[:RELATED_TOPIC]->(relatedTopicDoc:Document)
+		OPTIONAL MATCH (d)-[:IN_FOLDER]->(folder:Folder)<-[:IN_FOLDER]-(relatedFolderDoc:Document)
+		OPTIONAL MATCH (d)-[rt:RELATED_TOPIC]->(relatedTopicDoc:Document)
 		OPTIONAL MATCH (d)-[secRel:HAS_SECTION]->(section:Section)
 		OPTIONAL MATCH (d)-[:HAS_TOPIC]->(topic:Topic)
 		WITH d,
 		     count(DISTINCT c) AS chunkCount,
 		     collect(DISTINCT folder.name) AS folders,
-		     collect(DISTINCT related) + collect(DISTINCT relatedTopicDoc) AS relatedNodes,
+		     collect(DISTINCT CASE WHEN relatedFolderDoc IS NULL THEN NULL ELSE {id: relatedFolderDoc.id, title: relatedFolderDoc.title, path: relatedFolderDoc.path, weight: 0.1, reason: 'folder'} END) AS folderRelated,
+		     collect(DISTINCT CASE WHEN relatedTopicDoc IS NULL THEN NULL ELSE {id: relatedTopicDoc.id, title: relatedTopicDoc.title, path: relatedTopicDoc.path, weight: COALESCE(rt.score, rt.weight, 0.0), reason: 'topic'} END) AS topicRelated,
 		     collect(DISTINCT topic.name) AS topicNames,
 		     secRel,
 		     section
@@ -50,13 +50,14 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		WITH d,
 		     chunkCount,
 		     folders,
-		     relatedNodes,
+		     folderRelated,
+		     topicRelated,
 		     topicNames,
 		     collect({title: section.title, level: section.level, order: secRel.order}) AS sectionRows
 		WITH d,
 		     chunkCount,
 		     [f IN folders WHERE f IS NOT NULL] AS folderNames,
-		     [r IN relatedNodes WHERE r IS NOT NULL AND r.id <> d.id | {id: r.id, title: r.title, path: r.path}] AS relatedDocs,
+		     ([rel IN folderRelated WHERE rel IS NOT NULL] + [rel IN topicRelated WHERE rel IS NOT NULL]) AS relatedDocs,
 		     [s IN sectionRows WHERE s.title IS NOT NULL] AS sections,
 		     [t IN topicNames WHERE t IS NOT NULL] AS topics
 		RETURN d.id AS id,
@@ -157,7 +158,9 @@ func convertRelated(value any) ([]RelatedDocument, error) {
 			continue
 		}
 		seen[id] = struct{}{}
-		related = append(related, RelatedDocument{ID: id, Title: title, Path: path})
+		weight, _ := toFloat(data["weight"])
+		reason, _ := data["reason"].(string)
+		related = append(related, RelatedDocument{ID: id, Title: title, Path: path, Weight: weight, Reason: reason})
 	}
 
 	return related, nil
@@ -197,6 +200,23 @@ func toInt(value any) (int, bool) {
 		return int(v), true
 	case float64:
 		return int(v), true
+	default:
+		return 0, false
+	}
+}
+
+func toFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float32:
+		return float64(v), true
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
 	default:
 		return 0, false
 	}

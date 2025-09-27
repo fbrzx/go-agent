@@ -25,6 +25,8 @@ type Service struct {
 
 type Config struct {
 	SimilarityLimit int
+	SectionFilters  []string
+	TopicFilters    []string
 }
 
 func NewService(vectors VectorStore, graph GraphStore, embedder embeddings.Embedder, llmClient llm.Client, logger *log.Logger) *Service {
@@ -78,6 +80,14 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 		return Response{}, fmt.Errorf("no relevant context found for the question")
 	}
 
+	if len(cfg.SectionFilters) > 0 {
+		filtered := filterChunksBySections(chunks, cfg.SectionFilters)
+		if len(filtered) == 0 {
+			return Response{}, fmt.Errorf("no chunks matched the requested sections")
+		}
+		chunks = filtered
+	}
+
 	docIDs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
 		docIDs = append(docIDs, chunk.DocumentID)
@@ -94,6 +104,14 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 	}
 
 	sources := mergeSources(chunks, insights)
+	if len(cfg.TopicFilters) > 0 {
+		filteredSources := filterSourcesByTopics(sources, cfg.TopicFilters)
+		if len(filteredSources) == 0 {
+			return Response{}, fmt.Errorf("no documents matched the requested topics")
+		}
+		sources = filteredSources
+	}
+
 	contextPrompt := buildContextPrompt(sources)
 
 	messages := []llm.Message{
@@ -179,7 +197,15 @@ func buildContextPrompt(sources []Source) string {
 		if len(source.Insight.RelatedDocuments) > 0 {
 			sb.WriteString("Related documents:\n")
 			for _, related := range source.Insight.RelatedDocuments {
-				sb.WriteString(fmt.Sprintf("- %s (%s)\n", related.Title, related.Path))
+				weightInfo := ""
+				if related.Weight > 0 {
+					weightInfo = fmt.Sprintf(" weight %.2f", related.Weight)
+				}
+				reasonInfo := ""
+				if related.Reason != "" {
+					reasonInfo = fmt.Sprintf(" via %s", related.Reason)
+				}
+				sb.WriteString(fmt.Sprintf("- %s (%s)%s%s\n", related.Title, related.Path, weightInfo, reasonInfo))
 			}
 		}
 		sb.WriteString(source.Snippet)
@@ -213,4 +239,75 @@ func unique(values []string) []string {
 		result = append(result, v)
 	}
 	return result
+}
+
+func filterChunksBySections(chunks []ChunkResult, filters []string) []ChunkResult {
+	normalized := normalizeFilters(filters)
+	if len(normalized) == 0 {
+		return chunks
+	}
+
+	filtered := make([]ChunkResult, 0, len(chunks))
+	for _, chunk := range chunks {
+		sectionTitle := strings.ToLower(strings.TrimSpace(chunk.SectionTitle))
+		if sectionTitle == "" {
+			sectionTitle = "introduction"
+		}
+		order := fmt.Sprintf("%d", chunk.SectionOrder)
+		for _, filter := range normalized {
+			if strings.Contains(sectionTitle, filter) || (filter != "" && order == filter) {
+				filtered = append(filtered, chunk)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+func filterSourcesByTopics(sources []Source, filters []string) []Source {
+	normalized := normalizeFilters(filters)
+	if len(normalized) == 0 {
+		return sources
+	}
+
+	filtered := make([]Source, 0, len(sources))
+	for _, source := range sources {
+		topics := make([]string, len(source.Insight.Topics))
+		for i, topic := range source.Insight.Topics {
+			topics[i] = strings.ToLower(strings.TrimSpace(topic))
+		}
+		if containsAny(topics, normalized) {
+			filtered = append(filtered, source)
+		}
+	}
+	return filtered
+}
+
+func normalizeFilters(filters []string) []string {
+	result := make([]string, 0, len(filters))
+	for _, filter := range filters {
+		trimmed := strings.ToLower(strings.TrimSpace(filter))
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func containsAny(values []string, filters []string) bool {
+	valueSet := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		valueSet[v] = struct{}{}
+	}
+	for _, filter := range filters {
+		if _, ok := valueSet[filter]; ok {
+			return true
+		}
+		for value := range valueSet {
+			if strings.Contains(value, filter) {
+				return true
+			}
+		}
+	}
+	return false
 }

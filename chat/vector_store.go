@@ -52,6 +52,9 @@ func (s *PostgresVectorStore) SimilarChunks(ctx context.Context, embedding []flo
             rd.title,
             rd.source_path,
             rc.content,
+            rc.section_title,
+            COALESCE(rc.section_level, 0) AS section_level,
+            COALESCE(rc.section_order, 0) AS section_order,
             (rc.embedding <-> $1::vector) AS distance
         FROM rag_chunks rc
         JOIN rag_documents rd ON rd.id = rc.document_id
@@ -67,7 +70,7 @@ func (s *PostgresVectorStore) SimilarChunks(ctx context.Context, embedding []flo
 	for rows.Next() {
 		var item ChunkResult
 		var distance float64
-		if scanErr := rows.Scan(&item.ChunkID, &item.DocumentID, &item.Title, &item.Path, &item.Content, &distance); scanErr != nil {
+		if scanErr := rows.Scan(&item.ChunkID, &item.DocumentID, &item.Title, &item.Path, &item.Content, &item.SectionTitle, &item.SectionLevel, &item.SectionOrder, &distance); scanErr != nil {
 			return nil, fmt.Errorf("scan similar chunk: %w", scanErr)
 		}
 		item.Score = 1 / (1 + distance)

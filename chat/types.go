@@ -1,12 +1,15 @@
 package chat
 
 type ChunkResult struct {
-	ChunkID    string
-	DocumentID string
-	Title      string
-	Path       string
-	Content    string
-	Score      float64
+	ChunkID      string
+	DocumentID   string
+	Title        string
+	Path         string
+	Content      string
+	Score        float64
+	SectionTitle string
+	SectionLevel int
+	SectionOrder int
 }
 
 type DocumentInsight struct {
@@ -18,9 +21,11 @@ type DocumentInsight struct {
 }
 
 type RelatedDocument struct {
-	ID    string
-	Title string
-	Path  string
+	ID     string
+	Title  string
+	Path   string
+	Weight float64
+	Reason string
 }
 
 type SectionInfo struct {
