@@ -8,18 +8,32 @@ import (
 )
 
 type Document struct {
-	ID     string
-	Path   string
-	Title  string
-	SHA    string
-	Folder string
-	Chunks []Chunk
+	ID       string
+	Path     string
+	Title    string
+	SHA      string
+	Folder   string
+	Chunks   []Chunk
+	Sections []Section
+	Topics   []Topic
 }
 
 type Chunk struct {
+	ID        string
+	Index     int
+	Text      string
+	SectionID string
+}
+
+type Section struct {
 	ID    string
-	Index int
-	Text  string
+	Title string
+	Level int
+	Order int
+}
+
+type Topic struct {
+	Name string
 }
 
 func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Document) error {
@@ -76,6 +90,55 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 		}
 
 		if _, err := tx.Run(ctx, `
+			MATCH (d:Document {id: $id})-[:HAS_SECTION]->(s:Section)
+			DETACH DELETE s
+		`, map[string]any{"id": doc.ID}); err != nil {
+			return nil, fmt.Errorf("clear existing sections: %w", err)
+		}
+
+		if _, err := tx.Run(ctx, `
+			MATCH (d:Document {id: $id})-[r:HAS_TOPIC]->(t:Topic)
+			DELETE r
+		`, map[string]any{"id": doc.ID}); err != nil {
+			return nil, fmt.Errorf("clear existing topics: %w", err)
+		}
+
+		for _, section := range doc.Sections {
+			if _, err := tx.Run(ctx, `
+				MATCH (d:Document {id: $doc_id})
+				MERGE (s:Section {id: $section_id})
+				SET s.title = $section_title,
+				    s.level = $section_level,
+				    s.order = $section_order
+				MERGE (d)-[:HAS_SECTION {order: $section_order}]->(s)
+			`, map[string]any{
+				"doc_id":        doc.ID,
+				"section_id":    section.ID,
+				"section_title": section.Title,
+				"section_level": section.Level,
+				"section_order": section.Order,
+			}); err != nil {
+				return nil, fmt.Errorf("upsert section: %w", err)
+			}
+		}
+
+		for _, topic := range doc.Topics {
+			if topic.Name == "" {
+				continue
+			}
+			if _, err := tx.Run(ctx, `
+				MATCH (d:Document {id: $doc_id})
+				MERGE (t:Topic {name: $topic_name})
+				MERGE (d)-[:HAS_TOPIC]->(t)
+			`, map[string]any{
+				"doc_id":     doc.ID,
+				"topic_name": topic.Name,
+			}); err != nil {
+				return nil, fmt.Errorf("upsert topic: %w", err)
+			}
+		}
+
+		if _, err := tx.Run(ctx, `
 			MATCH (d:Document {id: $id})-[:HAS_CHUNK]->(c:Chunk)
 			DETACH DELETE c
 		`, map[string]any{"id": doc.ID}); err != nil {
@@ -97,10 +160,33 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 			}); err != nil {
 				return nil, fmt.Errorf("upsert chunk node: %w", err)
 			}
+
+			if chunk.SectionID != "" {
+				if _, err := tx.Run(ctx, `
+					MATCH (s:Section {id: $section_id}), (c:Chunk {id: $chunk_id})
+					MERGE (s)-[:HAS_CHUNK {order: $chunk_index}]->(c)
+				`, map[string]any{
+					"section_id":  chunk.SectionID,
+					"chunk_id":    chunk.ID,
+					"chunk_index": chunk.Index,
+				}); err != nil {
+					return nil, fmt.Errorf("link chunk to section: %w", err)
+				}
+			}
 		}
 
 		return nil, nil
 	})
+
+	if err == nil {
+		if _, cleanupErr := session.Run(ctx, `
+			MATCH (t:Topic)
+			WHERE NOT (t)<-[:HAS_TOPIC]-(:Document)
+			DELETE t
+		`, nil); cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+	}
 
 	return err
 }

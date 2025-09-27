@@ -144,6 +144,21 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 			if len(source.Insight.Folders) > 0 {
 				fmt.Printf("   Folders: %s\n", strings.Join(source.Insight.Folders, ", "))
 			}
+			if len(source.Insight.Sections) > 0 {
+				sectionParts := make([]string, 0, len(source.Insight.Sections))
+				for _, section := range source.Insight.Sections {
+					if section.Title == "" {
+						continue
+					}
+					sectionParts = append(sectionParts, fmt.Sprintf("%s (level %d)", section.Title, section.Level))
+				}
+				if len(sectionParts) > 0 {
+					fmt.Printf("   Sections: %s\n", strings.Join(sectionParts, "; "))
+				}
+			}
+			if len(source.Insight.Topics) > 0 {
+				fmt.Printf("   Topics: %s\n", strings.Join(source.Insight.Topics, ", "))
+			}
 			if len(source.Insight.RelatedDocuments) > 0 {
 				fmt.Println("   Related documents:")
 				for _, related := range source.Insight.RelatedDocuments {

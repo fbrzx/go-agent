@@ -37,6 +37,21 @@ type Service struct {
 	dimension int
 }
 
+type ChunkFragment struct {
+	Text    string
+	Section SectionMeta
+}
+
+type SectionMeta struct {
+	Title string
+	Level int
+	Order int
+}
+
+type TopicMeta struct {
+	Name string
+}
+
 func NewService(pool *pgxpool.Pool, driver neo4j.DriverWithContext, embedder embeddings.Embedder, logger *log.Logger, dimension int) *Service {
 	if logger == nil {
 		logger = log.Default()
@@ -114,19 +129,24 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 	hash := sha256.Sum256(data)
 	hashHex := hex.EncodeToString(hash[:])
 
-	chunks := ChunkMarkdown(content, defaultChunkSize, defaultChunkOverlap)
-	if len(chunks) == 0 {
+	fragments, sectionsMeta, topicsMeta := ChunkMarkdown(content, defaultChunkSize, defaultChunkOverlap)
+	if len(fragments) == 0 {
 		s.logger.Printf("skip empty document %s", path)
 		return nil
 	}
 
-	embeddings, err := s.embedder.Embed(ctx, chunks)
+	texts := make([]string, len(fragments))
+	for i, fragment := range fragments {
+		texts[i] = fragment.Text
+	}
+
+	embeddings, err := s.embedder.Embed(ctx, texts)
 	if err != nil {
 		return fmt.Errorf("generate embeddings: %w", err)
 	}
 
-	if len(embeddings) != len(chunks) {
-		return fmt.Errorf("embedding count mismatch: have %d chunks, %d embeddings", len(chunks), len(embeddings))
+	if len(embeddings) != len(fragments) {
+		return fmt.Errorf("embedding count mismatch: have %d chunks, %d embeddings", len(fragments), len(embeddings))
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -146,26 +166,48 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		return err
 	}
 
-	chunkNodes := make([]knowledge.Chunk, 0, len(chunks))
+	sectionIDs := map[int]string{}
+	sections := make([]knowledge.Section, 0, len(sectionsMeta))
+	for _, sectionMeta := range sectionsMeta {
+		id := uuid.New().String()
+		sections = append(sections, knowledge.Section{
+			ID:    id,
+			Title: sectionMeta.Title,
+			Level: sectionMeta.Level,
+			Order: sectionMeta.Order,
+		})
+		sectionIDs[sectionMeta.Order] = id
+	}
+
+	topics := make([]knowledge.Topic, 0, len(topicsMeta))
+	for _, topicMeta := range topicsMeta {
+		if topicMeta.Name == "" {
+			continue
+		}
+		topics = append(topics, knowledge.Topic{Name: topicMeta.Name})
+	}
+
+	chunkNodes := make([]knowledge.Chunk, 0, len(fragments))
 
 	if changed {
 		if _, err = tx.Exec(ctx, "DELETE FROM rag_chunks WHERE document_id = $1", docID); err != nil {
 			return fmt.Errorf("clear existing chunks: %w", err)
 		}
 
-		for idx, text := range chunks {
+		for idx, fragment := range fragments {
 			chunkID := uuid.New()
 			chunkNodes = append(chunkNodes, knowledge.Chunk{
-				ID:    chunkID.String(),
-				Index: idx,
-				Text:  text,
+				ID:        chunkID.String(),
+				Index:     idx,
+				Text:      fragment.Text,
+				SectionID: sectionIDs[fragment.Section.Order],
 			})
 
 			vec := pgvector.NewVector(embeddings[idx])
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO rag_chunks (id, document_id, chunk_index, content, embedding, created_at, updated_at)
 				VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-			`, chunkID, docID, idx, text, vec); err != nil {
+			`, chunkID, docID, idx, fragment.Text, vec); err != nil {
 				return fmt.Errorf("insert chunk %d: %w", idx, err)
 			}
 		}
@@ -181,12 +223,14 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 	}
 
 	doc := knowledge.Document{
-		ID:     docID.String(),
-		Path:   relPath,
-		Title:  title,
-		SHA:    hashHex,
-		Folder: folder,
-		Chunks: chunkNodes,
+		ID:       docID.String(),
+		Path:     relPath,
+		Title:    title,
+		SHA:      hashHex,
+		Folder:   folder,
+		Chunks:   chunkNodes,
+		Sections: sections,
+		Topics:   topics,
 	}
 
 	if err := knowledge.SyncDocument(ctx, s.driver, doc); err != nil {
@@ -247,39 +291,130 @@ func ExtractTitle(content, fallback string) string {
 	return fallback
 }
 
-func ChunkMarkdown(content string, target, overlap int) []string {
+func ChunkMarkdown(content string, target, overlap int) ([]ChunkFragment, []SectionMeta, []TopicMeta) {
 	clean := strings.ReplaceAll(content, "\r\n", "\n")
-	paragraphs := strings.Split(clean, "\n\n")
-	chunks := make([]string, 0)
-	current := make([]string, 0)
-	currentLen := 0
+	lines := strings.Split(clean, "\n")
 
-	for _, paragraph := range paragraphs {
-		p := strings.TrimSpace(paragraph)
-		if p == "" {
+	introSection := SectionMeta{Title: "Introduction", Level: 1, Order: 0}
+	currentSection := introSection
+	sectionOrder := 0
+	introUsed := false
+
+	sections := make([]SectionMeta, 0)
+	paragraphs := make([]paragraphWithSection, 0)
+	topicsSet := make(map[string]struct{})
+	topics := make([]TopicMeta, 0)
+
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
 			continue
 		}
 
-		paragraphLen := len(p)
-		if currentLen+paragraphLen > target && len(current) > 0 {
-			chunks = append(chunks, strings.Join(current, "\n\n"))
+		if strings.HasPrefix(line, "#") {
+			headingLevel := headingLevel(line)
+			title := strings.TrimSpace(line[headingLevel:])
+			if title == "" {
+				continue
+			}
+
+			if headingLevel <= 1 {
+				introSection.Title = title
+				currentSection = SectionMeta{Title: title, Level: 1, Order: 0}
+			} else {
+				sectionOrder++
+				currentSection = SectionMeta{Title: title, Level: headingLevel, Order: sectionOrder}
+				sections = append(sections, currentSection)
+				if headingLevel == 2 {
+					if _, seen := topicsSet[title]; !seen {
+						topicsSet[title] = struct{}{}
+						topics = append(topics, TopicMeta{Name: title})
+					}
+				}
+			}
+
+			paragraphs = append(paragraphs, paragraphWithSection{Text: title, Section: currentSection})
+			if currentSection.Order == 0 {
+				introUsed = true
+			}
+			continue
+		}
+
+		paragraphs = append(paragraphs, paragraphWithSection{Text: line, Section: currentSection})
+		if currentSection.Order == 0 {
+			introUsed = true
+		}
+	}
+
+	if introUsed {
+		top := SectionMeta{Title: introSection.Title, Level: introSection.Level, Order: introSection.Order}
+		sections = append([]SectionMeta{top}, sections...)
+	}
+
+	fragments := make([]ChunkFragment, 0)
+	current := make([]paragraphWithSection, 0)
+	currentLen := 0
+
+	for _, paragraph := range paragraphs {
+		pLen := len(paragraph.Text)
+		if currentLen+pLen > target && len(current) > 0 {
+			fragments = append(fragments, buildChunkFragment(current))
 			if overlap > 0 && len(current) > 0 {
 				last := current[len(current)-1]
-				current = []string{last}
-				currentLen = len(last)
+				current = []paragraphWithSection{last}
+				currentLen = len(last.Text)
 			} else {
 				current = current[:0]
 				currentLen = 0
 			}
 		}
 
-		current = append(current, p)
-		currentLen += paragraphLen
+		current = append(current, paragraph)
+		currentLen += pLen
 	}
 
 	if len(current) > 0 {
-		chunks = append(chunks, strings.Join(current, "\n\n"))
+		fragments = append(fragments, buildChunkFragment(current))
 	}
 
-	return chunks
+	return fragments, sections, topics
+}
+
+type paragraphWithSection struct {
+	Text    string
+	Section SectionMeta
+}
+
+func headingLevel(line string) int {
+	level := 0
+	for _, ch := range line {
+		if ch == '#' {
+			level++
+			continue
+		}
+		break
+	}
+	if level == 0 {
+		return 1
+	}
+	if level > 6 {
+		return 6
+	}
+	return level
+}
+
+func buildChunkFragment(paragraphs []paragraphWithSection) ChunkFragment {
+	texts := make([]string, len(paragraphs))
+	section := SectionMeta{Title: "Introduction", Level: 1, Order: 0}
+	for i, paragraph := range paragraphs {
+		texts[i] = paragraph.Text
+		if paragraph.Section.Order > section.Order || (section.Order == 0 && paragraph.Section.Title != "") {
+			section = paragraph.Section
+		}
+	}
+
+	return ChunkFragment{
+		Text:    strings.Join(texts, "\n\n"),
+		Section: section,
+	}
 }

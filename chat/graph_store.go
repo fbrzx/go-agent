@@ -31,24 +31,40 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 	defer session.Close(ctx)
 
 	result, err := session.Run(ctx, `
-        MATCH (d:Document)
-        WHERE d.id IN $ids
-        OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
-        OPTIONAL MATCH (d)-[:IN_FOLDER]->(folder:Folder)
-        OPTIONAL MATCH (folder)<-[:IN_FOLDER]-(related:Document)
-        WITH d,
-             count(DISTINCT c) AS chunkCount,
-             collect(DISTINCT folder.name) AS folders,
-             collect(DISTINCT related) AS relatedNodes
-        WITH d,
-             chunkCount,
-             [f IN folders WHERE f IS NOT NULL] AS folderNames,
-             [r IN relatedNodes WHERE r IS NOT NULL AND r.id <> d.id | {id: r.id, title: r.title, path: r.path}] AS relatedDocs
-        RETURN d.id AS id,
-               chunkCount,
-               folderNames AS folders,
-               relatedDocs AS relatedDocuments
-    `, map[string]any{"ids": docIDs})
+		MATCH (d:Document)
+		WHERE d.id IN $ids
+		OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
+		OPTIONAL MATCH (d)-[:IN_FOLDER]->(folder:Folder)
+		OPTIONAL MATCH (folder)<-[:IN_FOLDER]-(related:Document)
+		OPTIONAL MATCH (d)-[secRel:HAS_SECTION]->(section:Section)
+		OPTIONAL MATCH (d)-[:HAS_TOPIC]->(topic:Topic)
+		WITH d,
+		     count(DISTINCT c) AS chunkCount,
+		     collect(DISTINCT folder.name) AS folders,
+		     collect(DISTINCT related) AS relatedNodes,
+		     collect(DISTINCT topic.name) AS topicNames,
+		     secRel,
+		     section
+		ORDER BY secRel.order
+		WITH d,
+		     chunkCount,
+		     folders,
+		     relatedNodes,
+		     topicNames,
+		     collect({title: section.title, level: section.level, order: secRel.order}) AS sectionRows
+		WITH d,
+		     chunkCount,
+		     [f IN folders WHERE f IS NOT NULL] AS folderNames,
+		     [r IN relatedNodes WHERE r IS NOT NULL AND r.id <> d.id | {id: r.id, title: r.title, path: r.path}] AS relatedDocs,
+		     [s IN sectionRows WHERE s.title IS NOT NULL] AS sections,
+		     [t IN topicNames WHERE t IS NOT NULL] AS topics
+		RETURN d.id AS id,
+		       chunkCount,
+		       folderNames AS folders,
+		       relatedDocs AS relatedDocuments,
+		       sections,
+		       topics
+	`, map[string]any{"ids": docIDs})
 	if err != nil {
 		return nil, fmt.Errorf("run neo4j insights query: %w", err)
 	}
@@ -60,6 +76,8 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		count, _ := record.Get("chunkCount")
 		foldersVal, _ := record.Get("folders")
 		relatedVal, _ := record.Get("relatedDocuments")
+		sectionsVal, _ := record.Get("sections")
+		topicsVal, _ := record.Get("topics")
 		docID, ok := id.(string)
 		if !ok {
 			continue
@@ -76,11 +94,15 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		if err != nil {
 			return nil, fmt.Errorf("parse related documents: %w", err)
 		}
+		sectionsInfo := convertSections(sectionsVal)
+		topics := convertStringSlice(topicsVal)
 
 		insights[docID] = DocumentInsight{
 			ChunkCount:       int(chunkCount),
 			Folders:          folders,
 			RelatedDocuments: relatedDocs,
+			Sections:         sectionsInfo,
+			Topics:           topics,
 		}
 	}
 
@@ -133,4 +155,43 @@ func convertRelated(value any) ([]RelatedDocument, error) {
 	}
 
 	return related, nil
+}
+
+func convertSections(value any) []SectionInfo {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+
+	sections := make([]SectionInfo, 0, len(raw))
+	for _, item := range raw {
+		data, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		title, _ := data["title"].(string)
+		level, _ := toInt(data["level"])
+		order, _ := toInt(data["order"])
+		if title == "" {
+			continue
+		}
+		sections = append(sections, SectionInfo{Title: title, Level: level, Order: order})
+	}
+
+	return sections
+}
+
+func toInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int32:
+		return int(v), true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	default:
+		return 0, false
+	}
 }

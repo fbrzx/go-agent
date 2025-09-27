@@ -94,6 +94,8 @@ func TestChatServiceReturnsAnswer(t *testing.T) {
 				ChunkCount:       4,
 				Folders:          []string{"knowledge"},
 				RelatedDocuments: []chat.RelatedDocument{{ID: "doc-2", Title: "Doc Two", Path: "doc2.md"}},
+				Sections:         []chat.SectionInfo{{Title: "Section A", Level: 2, Order: 1}},
+				Topics:           []string{"Topic A"},
 			},
 		}},
 		&stubEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}},
@@ -123,6 +125,12 @@ func TestChatServiceReturnsAnswer(t *testing.T) {
 	}
 	if len(source.Insight.RelatedDocuments) != 1 || source.Insight.RelatedDocuments[0].ID != "doc-2" {
 		t.Fatalf("expected related doc 'doc-2', got %#v", source.Insight.RelatedDocuments)
+	}
+	if len(source.Insight.Sections) != 1 || source.Insight.Sections[0].Title != "Section A" {
+		t.Fatalf("expected section 'Section A', got %#v", source.Insight.Sections)
+	}
+	if len(source.Insight.Topics) != 1 || source.Insight.Topics[0] != "Topic A" {
+		t.Fatalf("expected topic 'Topic A', got %#v", source.Insight.Topics)
 	}
 }
 

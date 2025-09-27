@@ -13,12 +13,20 @@ type DocumentInsight struct {
 	ChunkCount       int
 	Folders          []string
 	RelatedDocuments []RelatedDocument
+	Sections         []SectionInfo
+	Topics           []string
 }
 
 type RelatedDocument struct {
 	ID    string
 	Title string
 	Path  string
+}
+
+type SectionInfo struct {
+	Title string
+	Level int
+	Order int
 }
 
 type Source struct {

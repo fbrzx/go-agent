@@ -11,6 +11,7 @@ import (
 
 func TestChunkMarkdownRespectsOverlap(t *testing.T) {
 	text := "# Title\n\n" +
+		"## Section One\n\n" +
 		"Paragraph one." +
 		"\n\n" +
 		"Paragraph two is quite a bit longer than the first paragraph and should trigger a split." +
@@ -19,13 +20,21 @@ func TestChunkMarkdownRespectsOverlap(t *testing.T) {
 		"\n\n" +
 		"Paragraph four."
 
-	chunks := ingestion.ChunkMarkdown(text, 50, 10)
-	if len(chunks) < 2 {
-		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	fragments, sections, topics := ingestion.ChunkMarkdown(text, 50, 10)
+	if len(fragments) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(fragments))
 	}
 
-	if chunks[0] == chunks[1] {
+	if fragments[0].Text == fragments[1].Text {
 		t.Fatalf("expected overlapping but not identical chunks")
+	}
+
+	if len(sections) == 0 {
+		t.Fatal("expected at least one section metadata entry")
+	}
+
+	if len(topics) == 0 {
+		t.Fatal("expected at least one topic from level-2 headings")
 	}
 }
 
@@ -45,8 +54,14 @@ func TestIngestDirectoryMissingEmbedder(t *testing.T) {
 }
 
 func TestChunkMarkdownHandlesEmpty(t *testing.T) {
-	chunks := ingestion.ChunkMarkdown("\n\n", 100, 20)
-	if len(chunks) != 0 {
-		t.Fatalf("expected no chunks for empty content, got %d", len(chunks))
+	fragments, sections, topics := ingestion.ChunkMarkdown("\n\n", 100, 20)
+	if len(fragments) != 0 {
+		t.Fatalf("expected no chunks for empty content, got %d", len(fragments))
+	}
+	if len(sections) != 0 {
+		t.Fatalf("expected no sections for empty content, got %d", len(sections))
+	}
+	if len(topics) != 0 {
+		t.Fatalf("expected no topics for empty content, got %d", len(topics))
 	}
 }

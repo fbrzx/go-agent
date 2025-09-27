@@ -158,6 +158,21 @@ func buildContextPrompt(sources []Source) string {
 		if source.Insight.ChunkCount > 0 {
 			sb.WriteString(fmt.Sprintf("Chunks indexed: %d\n", source.Insight.ChunkCount))
 		}
+		if len(source.Insight.Sections) > 0 {
+			var parts []string
+			for _, section := range source.Insight.Sections {
+				if section.Title == "" {
+					continue
+				}
+				parts = append(parts, fmt.Sprintf("%s (level %d)", section.Title, section.Level))
+			}
+			if len(parts) > 0 {
+				sb.WriteString("Sections: " + strings.Join(parts, "; ") + "\n")
+			}
+		}
+		if len(source.Insight.Topics) > 0 {
+			sb.WriteString("Topics: " + strings.Join(source.Insight.Topics, ", ") + "\n")
+		}
 		if len(source.Insight.Folders) > 0 {
 			sb.WriteString("Folders: " + strings.Join(source.Insight.Folders, ", ") + "\n")
 		}

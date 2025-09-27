@@ -30,6 +30,8 @@ func TestGraphInsightsIncludesFoldersAndRelatedDocs(t *testing.T) {
 	docA := uuid.New().String()
 	docB := uuid.New().String()
 	folder := "integration/tests"
+	sectionA := knowledge.Section{ID: uuid.New().String(), Title: "Overview", Level: 2, Order: 1}
+	sectionB := knowledge.Section{ID: uuid.New().String(), Title: "Details", Level: 2, Order: 1}
 
 	cleanup := func() {
 		session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
@@ -42,26 +44,30 @@ func TestGraphInsightsIncludesFoldersAndRelatedDocs(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	if err := knowledge.SyncDocument(ctx, driver, knowledge.Document{
-		ID:     docA,
-		Path:   "integration/docA.md",
-		Title:  "Doc A",
-		SHA:    "sha-a",
-		Folder: folder,
+		ID:       docA,
+		Path:     "integration/docA.md",
+		Title:    "Doc A",
+		SHA:      "sha-a",
+		Folder:   folder,
+		Sections: []knowledge.Section{sectionA},
+		Topics:   []knowledge.Topic{{Name: "Integration"}},
 		Chunks: []knowledge.Chunk{
-			{ID: uuid.New().String(), Index: 0, Text: "chunk a1"},
-			{ID: uuid.New().String(), Index: 1, Text: "chunk a2"},
+			{ID: uuid.New().String(), Index: 0, Text: "chunk a1", SectionID: sectionA.ID},
+			{ID: uuid.New().String(), Index: 1, Text: "chunk a2", SectionID: sectionA.ID},
 		},
 	}); err != nil {
 		t.Fatalf("sync doc A: %v", err)
 	}
 
 	if err := knowledge.SyncDocument(ctx, driver, knowledge.Document{
-		ID:     docB,
-		Path:   "integration/docB.md",
-		Title:  "Doc B",
-		SHA:    "sha-b",
-		Folder: folder,
-		Chunks: []knowledge.Chunk{{ID: uuid.New().String(), Index: 0, Text: "chunk b1"}},
+		ID:       docB,
+		Path:     "integration/docB.md",
+		Title:    "Doc B",
+		SHA:      "sha-b",
+		Folder:   folder,
+		Sections: []knowledge.Section{sectionB},
+		Topics:   []knowledge.Topic{{Name: "Integration"}},
+		Chunks:   []knowledge.Chunk{{ID: uuid.New().String(), Index: 0, Text: "chunk b1", SectionID: sectionB.ID}},
 	}); err != nil {
 		t.Fatalf("sync doc B: %v", err)
 	}
@@ -87,5 +93,13 @@ func TestGraphInsightsIncludesFoldersAndRelatedDocs(t *testing.T) {
 
 	if len(info.RelatedDocuments) == 0 || info.RelatedDocuments[0].ID != docB {
 		t.Fatalf("expected related document %s, got %#v", docB, info.RelatedDocuments)
+	}
+
+	if len(info.Sections) == 0 || info.Sections[0].Title != sectionA.Title {
+		t.Fatalf("expected section %s, got %#v", sectionA.Title, info.Sections)
+	}
+
+	if len(info.Topics) == 0 || info.Topics[0] != "Integration" {
+		t.Fatalf("expected topic Integration, got %#v", info.Topics)
 	}
 }
