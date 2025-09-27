@@ -205,9 +205,9 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 
 			vec := pgvector.NewVector(embeddings[idx])
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO rag_chunks (id, document_id, chunk_index, content, embedding, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-			`, chunkID, docID, idx, fragment.Text, vec); err != nil {
+				INSERT INTO rag_chunks (id, document_id, chunk_index, section_order, section_level, section_title, content, embedding, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+			`, chunkID, docID, idx, fragment.Section.Order, fragment.Section.Level, fragment.Section.Title, fragment.Text, vec); err != nil {
 				return fmt.Errorf("insert chunk %d: %w", idx, err)
 			}
 		}

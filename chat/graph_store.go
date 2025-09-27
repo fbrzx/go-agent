@@ -36,12 +36,13 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
 		OPTIONAL MATCH (d)-[:IN_FOLDER]->(folder:Folder)
 		OPTIONAL MATCH (folder)<-[:IN_FOLDER]-(related:Document)
+		OPTIONAL MATCH (d)-[:RELATED_TOPIC]->(relatedTopicDoc:Document)
 		OPTIONAL MATCH (d)-[secRel:HAS_SECTION]->(section:Section)
 		OPTIONAL MATCH (d)-[:HAS_TOPIC]->(topic:Topic)
 		WITH d,
 		     count(DISTINCT c) AS chunkCount,
 		     collect(DISTINCT folder.name) AS folders,
-		     collect(DISTINCT related) AS relatedNodes,
+		     collect(DISTINCT related) + collect(DISTINCT relatedTopicDoc) AS relatedNodes,
 		     collect(DISTINCT topic.name) AS topicNames,
 		     secRel,
 		     section
@@ -140,6 +141,7 @@ func convertRelated(value any) ([]RelatedDocument, error) {
 	}
 
 	related := make([]RelatedDocument, 0, len(raw))
+	seen := make(map[string]struct{})
 	for _, item := range raw {
 		data, ok := item.(map[string]any)
 		if !ok {
@@ -151,6 +153,10 @@ func convertRelated(value any) ([]RelatedDocument, error) {
 		if id == "" {
 			continue
 		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
 		related = append(related, RelatedDocument{ID: id, Title: title, Path: path})
 	}
 

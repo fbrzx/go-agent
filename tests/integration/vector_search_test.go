@@ -60,12 +60,12 @@ func TestVectorSearchRanking(t *testing.T) {
 	}
 
 	if _, err := pool.Exec(ctx, `
-        INSERT INTO rag_chunks (id, document_id, chunk_index, content, embedding, created_at, updated_at)
-        VALUES ($1, $2, 0, $3, $4, NOW(), NOW()),
-               ($5, $6, 0, $7, $8, NOW(), NOW())
-    `,
-		chunkA, docA, "Chunk A", pgvector.NewVector(makeVector(1.0)),
-		chunkB, docB, "Chunk B", pgvector.NewVector(makeVector(0.4)),
+	        INSERT INTO rag_chunks (id, document_id, chunk_index, section_order, section_level, section_title, content, embedding, created_at, updated_at)
+	        VALUES ($1, $2, 0, 1, 2, $3, $4, $5, NOW(), NOW()),
+	               ($6, $7, 0, 2, 2, $8, $9, $10, NOW(), NOW())
+	`,
+		chunkA, docA, "Section A", "Chunk A", pgvector.NewVector(makeVector(1.0)),
+		chunkB, docB, "Section B", "Chunk B", pgvector.NewVector(makeVector(0.4)),
 	); err != nil {
 		t.Fatalf("insert chunks: %v", err)
 	}

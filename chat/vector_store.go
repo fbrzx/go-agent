@@ -31,7 +31,21 @@ func (s *PostgresVectorStore) SimilarChunks(ctx context.Context, embedding []flo
 		limit = 5
 	}
 
-	rows, err := s.pool.Query(ctx, `
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	probes := limit * 10
+	if probes < 10 {
+		probes = 10
+	}
+	if _, err := conn.Exec(ctx, fmt.Sprintf("SET ivfflat.probes = %d", probes)); err != nil {
+		return nil, fmt.Errorf("set ivfflat probes: %w", err)
+	}
+
+	rows, err := conn.Query(ctx, `
         SELECT
             rc.id,
             rc.document_id,

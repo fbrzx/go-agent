@@ -67,6 +67,7 @@ Behind the scenes the command:
 - Generates embeddings through the configured provider.
 - Stores vectors inside `rag_chunks` and mirrors document/chunk relationships in Neo4j.
 - Captures folder hierarchy and cross-document relationships inside Neo4j for richer retrieval context.
+- Tracks section hierarchy and shared topics so chunk embeddings stay aligned with both Postgres metadata and Neo4j relationships, enabling topic-similarity navigation during chat.
 
 ## Development Tasks
 

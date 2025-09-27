@@ -139,6 +139,28 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 		}
 
 		if _, err := tx.Run(ctx, `
+			MATCH (d:Document {id: $id})-[r:RELATED_TOPIC]->()
+			DELETE r
+		`, map[string]any{"id": doc.ID}); err != nil {
+			return nil, fmt.Errorf("clear existing outgoing topic relations: %w", err)
+		}
+
+		if _, err := tx.Run(ctx, `
+			MATCH ()-[r:RELATED_TOPIC]->(d:Document {id: $id})
+			DELETE r
+		`, map[string]any{"id": doc.ID}); err != nil {
+			return nil, fmt.Errorf("clear existing incoming topic relations: %w", err)
+		}
+
+		if _, err := tx.Run(ctx, `
+			MATCH (d:Document {id: $id})-[:HAS_TOPIC]->(t:Topic)<-[:HAS_TOPIC]-(other:Document)
+			WHERE other.id <> d.id
+			MERGE (d)-[:RELATED_TOPIC {name: t.name}]->(other)
+		`, map[string]any{"id": doc.ID}); err != nil {
+			return nil, fmt.Errorf("link related topics: %w", err)
+		}
+
+		if _, err := tx.Run(ctx, `
 			MATCH (d:Document {id: $id})-[:HAS_CHUNK]->(c:Chunk)
 			DETACH DELETE c
 		`, map[string]any{"id": doc.ID}); err != nil {
@@ -177,16 +199,6 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 
 		return nil, nil
 	})
-
-	if err == nil {
-		if _, cleanupErr := session.Run(ctx, `
-			MATCH (t:Topic)
-			WHERE NOT (t)<-[:HAS_TOPIC]-(:Document)
-			DELETE t
-		`, nil); cleanupErr != nil && err == nil {
-			err = cleanupErr
-		}
-	}
 
 	return err
 }
