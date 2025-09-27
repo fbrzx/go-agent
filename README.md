@@ -88,12 +88,19 @@ workflows as the CLI (existing `make` targets continue to run the local commands
 
 - `POST /v1/ingest` – trigger ingestion (optional body `{ "dir": "./other/docs" }`).
 - `POST /v1/chat` – ask a question with body `{ "question": "...", "limit": 5 }` and optional section/topic filters.
+- `POST /v1/chat/stream` – identical contract but streams `text/event-stream` chunks for real-time output.
 - `POST /v1/clear` – clear persisted data; requires `{ "confirm": true }`.
 - `GET /healthz` – lightweight readiness probe.
 - `GET /openapi.yaml` – download the full OpenAPI 3.0 contract.
 
 Responses include detailed error payloads and source metadata identical to the CLI output. See
 `api/openapi.yaml` for the authoritative schema.
+
+## Web UI
+
+Run `make serve` and open `http://localhost:8080/` to try a minimal streaming chat UI backed by the
+new SSE endpoint. Each follow-up question keeps the conversation context, and supporting sources are
+displayed inline for quick reference.
 
 ## Project Layout
 

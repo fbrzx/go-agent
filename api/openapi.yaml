@@ -100,6 +100,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/chat/stream:
+    post:
+      summary: Stream a chat response chunk-by-chunk using Server-Sent Events.
+      operationId: chatStream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Server-Sent Events stream containing `chunk`, `final`, and `done` events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                sample:
+                  summary: SSE event sequence
+                  value: |
+                    event: chunk
+                    data: {"content":"Hello"}
+
+                    event: final
+                    data: {"answer":"Hello world","sources":[],"history":[]}
+
+                    event: done
+                    data: {"message":"complete"}
+        '400':
+          description: The question is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Chat workflow failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/clear:
     post:
       summary: Clear ingested RAG data from Postgres and Neo4j.
@@ -176,6 +217,11 @@ components:
           items:
             type: string
           description: Optional topic filters.
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          description: Optional conversation history (user/assistant turns) to maintain context.
       required:
         - question
     ChatResponse:
@@ -188,9 +234,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChatSource'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          description: Updated conversation history including the latest turn.
       required:
         - answer
         - sources
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+      required:
+        - role
+        - content
     ChatSource:
       type: object
       additionalProperties: false
@@ -279,6 +342,32 @@ components:
         - id
         - title
         - path
+    ChatStreamChunk:
+      type: object
+      additionalProperties: false
+      properties:
+        content:
+          type: string
+          description: Partial assistant output chunk.
+      required:
+        - content
+    ChatStreamFinal:
+      type: object
+      additionalProperties: false
+      properties:
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatSource'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+      required:
+        - answer
+        - sources
     ClearRequest:
       type: object
       additionalProperties: false

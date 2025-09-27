@@ -45,15 +45,22 @@ type clearRequest struct {
 }
 
 type chatRequest struct {
-	Question string   `json:"question"`
-	Limit    int      `json:"limit"`
-	Sections []string `json:"sections"`
-	Topics   []string `json:"topics"`
+	Question string           `json:"question"`
+	Limit    int              `json:"limit"`
+	Sections []string         `json:"sections"`
+	Topics   []string         `json:"topics"`
+	History  []messagePayload `json:"history"`
 }
 
 type chatResponse struct {
-	Answer  string       `json:"answer"`
-	Sources []chatSource `json:"sources"`
+	Answer  string           `json:"answer"`
+	Sources []chatSource     `json:"sources"`
+	History []messagePayload `json:"history,omitempty"`
+}
+
+type messagePayload struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type chatSource struct {
@@ -88,6 +95,16 @@ type chatRelatedDocument struct {
 	Reason     string  `json:"reason"`
 }
 
+type chatStreamChunk struct {
+	Content string `json:"content"`
+}
+
+type chatStreamFinal struct {
+	Answer  string           `json:"answer"`
+	Sources []chatSource     `json:"sources"`
+	History []messagePayload `json:"history"`
+}
+
 // New constructs a Server that serves the HTTP API using the provided configuration.
 func New(cfg config.Config, logger *log.Logger) *Server {
 	if logger == nil {
@@ -113,7 +130,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/openapi.yaml", s.handleOpenAPI)
 	mux.HandleFunc("/v1/ingest", s.handleIngest)
 	mux.HandleFunc("/v1/chat", s.handleChat)
+	mux.HandleFunc("/v1/chat/stream", s.handleChatStream)
 	mux.HandleFunc("/v1/clear", s.handleClear)
+	mux.HandleFunc("/", s.handleRoot)
+	mux.Handle("/static/", http.StripPrefix("/static/", s.staticHandler()))
 	return mux
 }
 
@@ -205,54 +225,95 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := req.Limit
-	if limit <= 0 {
-		limit = defaultChatLimit
-	}
-
 	ctx := r.Context()
 
-	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
+	history, err := parseHistory(req.History)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("postgres connection: %w", err))
-		return
-	}
-	defer pgPool.Close()
-
-	neo4jDriver, err := database.NewNeo4jDriver(ctx, s.cfg.Neo4jURI, s.cfg.Neo4jUser, s.cfg.Neo4jPass)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("neo4j connection: %w", err))
-		return
-	}
-	defer neo4jDriver.Close(ctx)
-
-	embedder, err := embeddings.NewEmbedder(s.cfg)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("embedder setup: %w", err))
+		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	llmClient, err := llm.NewClient(s.cfg)
+	svc, cleanup, err := s.buildChatService(ctx)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("llm setup: %w", err))
+		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	defer cleanup()
 
-	vectorStore := chat.NewPostgresVectorStore(pgPool)
-	graphStore := chat.NewNeo4jGraphStore(neo4jDriver)
-	svc := chat.NewService(vectorStore, graphStore, embedder, llmClient, s.logger)
-
-	resp, err := svc.Chat(ctx, req.Question, chat.Config{
-		SimilarityLimit: limit,
+	resp, updatedHistory, err := svc.ChatStream(ctx, req.Question, chat.Config{
+		SimilarityLimit: s.resolveLimit(req.Limit),
 		SectionFilters:  req.Sections,
 		TopicFilters:    req.Topics,
-	})
+	}, history, nil)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("chat failed: %w", err))
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, transformChatResponse(&resp))
+	s.writeJSON(w, http.StatusOK, buildChatResponse(resp, updatedHistory))
+}
+
+func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.methodNotAllowed(w, http.MethodPost)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("streaming not supported"))
+		return
+	}
+
+	var req chatRequest
+	if err := decodeJSON(r, &req); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("decode request: %w", err))
+		return
+	}
+
+	req.Question = strings.TrimSpace(req.Question)
+	if req.Question == "" {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("question is required"))
+		return
+	}
+
+	history, err := parseHistory(req.History)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	ctx := r.Context()
+	svc, cleanup, err := s.buildChatService(ctx)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer cleanup()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	resp, updatedHistory, err := svc.ChatStream(ctx, req.Question, chat.Config{
+		SimilarityLimit: s.resolveLimit(req.Limit),
+		SectionFilters:  req.Sections,
+		TopicFilters:    req.Topics,
+	}, history, func(chunk string) error {
+		return s.sendSSE(w, flusher, "chunk", chatStreamChunk{Content: chunk})
+	})
+	if err != nil {
+		_ = s.sendSSE(w, flusher, "error", errorResponse{Error: err.Error()})
+		return
+	}
+
+	final := buildChatResponse(resp, updatedHistory)
+	_ = s.sendSSE(w, flusher, "final", chatStreamFinal{
+		Answer:  final.Answer,
+		Sources: final.Sources,
+		History: final.History,
+	})
+	_ = s.sendSSE(w, flusher, "done", messageResponse{Message: "complete"})
 }
 
 func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
@@ -348,19 +409,99 @@ func decodeJSON(r *http.Request, dst any) error {
 	return nil
 }
 
-func transformChatResponse(resp *chat.Response) chatResponse {
-	if resp == nil {
-		return chatResponse{}
+func (s *Server) resolveLimit(limit int) int {
+	if limit <= 0 {
+		return defaultChatLimit
+	}
+	return limit
+}
+
+func (s *Server) buildChatService(ctx context.Context) (*chat.Service, func(), error) {
+	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("postgres connection: %w", err)
 	}
 
+	neo4jDriver, err := database.NewNeo4jDriver(ctx, s.cfg.Neo4jURI, s.cfg.Neo4jUser, s.cfg.Neo4jPass)
+	if err != nil {
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("neo4j connection: %w", err)
+	}
+
+	embedder, err := embeddings.NewEmbedder(s.cfg)
+	if err != nil {
+		neo4jDriver.Close(ctx)
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("embedder setup: %w", err)
+	}
+
+	llmClient, err := llm.NewClient(s.cfg)
+	if err != nil {
+		neo4jDriver.Close(ctx)
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("llm setup: %w", err)
+	}
+
+	vectorStore := chat.NewPostgresVectorStore(pgPool)
+	graphStore := chat.NewNeo4jGraphStore(neo4jDriver)
+	svc := chat.NewService(vectorStore, graphStore, embedder, llmClient, s.logger)
+
+	cleanup := func() {
+		neo4jDriver.Close(ctx)
+		pgPool.Close()
+	}
+
+	return svc, cleanup, nil
+}
+
+func parseHistory(payloads []messagePayload) ([]llm.Message, error) {
+	if len(payloads) == 0 {
+		return nil, nil
+	}
+	messages := make([]llm.Message, 0, len(payloads))
+	for _, payload := range payloads {
+		role := strings.TrimSpace(payload.Role)
+		content := strings.TrimSpace(payload.Content)
+		if role == "" || content == "" {
+			continue
+		}
+		switch role {
+		case llm.RoleUser, llm.RoleAssistant, llm.RoleSystem:
+			messages = append(messages, llm.Message{Role: role, Content: content})
+		default:
+			return nil, fmt.Errorf("unsupported history role: %s", role)
+		}
+	}
+	return messages, nil
+}
+
+func toMessagePayloads(messages []llm.Message) []messagePayload {
+	if len(messages) == 0 {
+		return nil
+	}
+	converted := make([]messagePayload, 0, len(messages))
+	for _, msg := range messages {
+		converted = append(converted, messagePayload{Role: msg.Role, Content: msg.Content})
+	}
+	return converted
+}
+
+func buildChatResponse(resp chat.Response, history []llm.Message) chatResponse {
 	converted := chatResponse{Answer: resp.Answer}
-	if len(resp.Sources) == 0 {
-		return converted
+	converted.Sources = buildSources(resp.Sources)
+	if len(history) > 0 {
+		converted.History = toMessagePayloads(history)
 	}
+	return converted
+}
 
-	sources := make([]chatSource, len(resp.Sources))
-	for i, src := range resp.Sources {
-		sources[i] = chatSource{
+func buildSources(sources []chat.Source) []chatSource {
+	if len(sources) == 0 {
+		return nil
+	}
+	converted := make([]chatSource, len(sources))
+	for i, src := range sources {
+		converted[i] = chatSource{
 			DocumentID: src.DocumentID,
 			Title:      src.Title,
 			Path:       src.Path,
@@ -369,7 +510,6 @@ func transformChatResponse(resp *chat.Response) chatResponse {
 			Insight:    transformInsight(src.Insight),
 		}
 	}
-	converted.Sources = sources
 	return converted
 }
 
@@ -402,6 +542,24 @@ func transformInsight(insight chat.DocumentInsight) chatDocumentInsight {
 		Topics:           append([]string(nil), insight.Topics...),
 		RelatedDocuments: related,
 	}
+}
+
+func (s *Server) sendSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		s.logger.Printf("marshal sse payload: %v", err)
+		return err
+	}
+	if event != "" {
+		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 func purgeNeo4j(ctx context.Context, session neo4j.SessionWithContext) error {
