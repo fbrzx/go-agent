@@ -141,6 +141,15 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 			if source.Insight.ChunkCount > 0 {
 				fmt.Printf("   Indexed chunks: %d\n", source.Insight.ChunkCount)
 			}
+			if len(source.Insight.Folders) > 0 {
+				fmt.Printf("   Folders: %s\n", strings.Join(source.Insight.Folders, ", "))
+			}
+			if len(source.Insight.RelatedDocuments) > 0 {
+				fmt.Println("   Related documents:")
+				for _, related := range source.Insight.RelatedDocuments {
+					fmt.Printf("     - %s (%s)\n", related.Title, related.Path)
+				}
+			}
 		}
 	}
 }
@@ -204,6 +213,7 @@ func purgeNeo4j(ctx context.Context, session neo4j.SessionWithContext) error {
 	queries := []string{
 		"MATCH (d:Document) DETACH DELETE d",
 		"MATCH (c:Chunk) DETACH DELETE c",
+		"MATCH (f:Folder) DETACH DELETE f",
 	}
 
 	for _, query := range queries {

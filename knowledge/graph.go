@@ -12,6 +12,7 @@ type Document struct {
 	Path   string
 	Title  string
 	SHA    string
+	Folder string
 	Chunks []Chunk
 }
 
@@ -29,6 +30,14 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 
+	params := map[string]any{
+		"id":     doc.ID,
+		"path":   doc.Path,
+		"title":  doc.Title,
+		"sha":    doc.SHA,
+		"folder": doc.Folder,
+	}
+
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		if _, err := tx.Run(ctx, `
 			MERGE (d:Document {id: $id})
@@ -36,13 +45,34 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 			    d.title = $title,
 			    d.sha256 = $sha,
 			    d.updated_at = datetime()
-		`, map[string]any{
-			"id":    doc.ID,
-			"path":  doc.Path,
-			"title": doc.Title,
-			"sha":   doc.SHA,
-		}); err != nil {
+		`, params); err != nil {
 			return nil, fmt.Errorf("upsert document node: %w", err)
+		}
+
+		if doc.Folder != "" {
+			if _, err := tx.Run(ctx, `
+				MATCH (d:Document {id: $id})-[r:IN_FOLDER]->(:Folder)
+				DELETE r
+			`, params); err != nil {
+				return nil, fmt.Errorf("remove stale folder relation: %w", err)
+			}
+			if _, err := tx.Run(ctx, `
+				MATCH (d:Document {id: $id})
+				MERGE (f:Folder {name: $folder})
+				MERGE (d)-[:IN_FOLDER]->(f)
+			`, params); err != nil {
+				return nil, fmt.Errorf("upsert folder relation: %w", err)
+			}
+		} else {
+			if _, err := tx.Run(ctx, `
+				MATCH (d:Document {id: $id})-[r:IN_FOLDER]->(f:Folder)
+				DELETE r
+				WITH f
+				WHERE NOT (f)<-[:IN_FOLDER]-(:Document)
+				DETACH DELETE f
+			`, params); err != nil {
+				return nil, fmt.Errorf("cleanup folder relation: %w", err)
+			}
 		}
 
 		if _, err := tx.Run(ctx, `

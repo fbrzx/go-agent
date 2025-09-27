@@ -66,6 +66,7 @@ Behind the scenes the command:
 - Splits Markdown into overlapping chunks.
 - Generates embeddings through the configured provider.
 - Stores vectors inside `rag_chunks` and mirrors document/chunk relationships in Neo4j.
+- Captures folder hierarchy and cross-document relationships inside Neo4j for richer retrieval context.
 
 ## Development Tasks
 

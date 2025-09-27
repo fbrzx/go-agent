@@ -10,7 +10,15 @@ type ChunkResult struct {
 }
 
 type DocumentInsight struct {
-	ChunkCount int
+	ChunkCount       int
+	Folders          []string
+	RelatedDocuments []RelatedDocument
+}
+
+type RelatedDocument struct {
+	ID    string
+	Title string
+	Path  string
 }
 
 type Source struct {

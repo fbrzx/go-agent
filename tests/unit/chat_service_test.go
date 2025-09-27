@@ -90,7 +90,11 @@ func TestChatServiceReturnsAnswer(t *testing.T) {
 			},
 		}},
 		&stubGraphStore{data: map[string]chat.DocumentInsight{
-			"doc-1": {ChunkCount: 4},
+			"doc-1": {
+				ChunkCount:       4,
+				Folders:          []string{"knowledge"},
+				RelatedDocuments: []chat.RelatedDocument{{ID: "doc-2", Title: "Doc Two", Path: "doc2.md"}},
+			},
 		}},
 		&stubEmbedder{vectors: [][]float32{{0.1, 0.2, 0.3}}},
 		&stubLLM{answer: "Here is the response."},
@@ -110,8 +114,15 @@ func TestChatServiceReturnsAnswer(t *testing.T) {
 		t.Fatalf("expected 1 source, got %d", len(resp.Sources))
 	}
 
-	if resp.Sources[0].Insight.ChunkCount != 4 {
-		t.Fatalf("expected chunk count 4, got %d", resp.Sources[0].Insight.ChunkCount)
+	source := resp.Sources[0]
+	if source.Insight.ChunkCount != 4 {
+		t.Fatalf("expected chunk count 4, got %d", source.Insight.ChunkCount)
+	}
+	if len(source.Insight.Folders) != 1 || source.Insight.Folders[0] != "knowledge" {
+		t.Fatalf("expected folder 'knowledge', got %#v", source.Insight.Folders)
+	}
+	if len(source.Insight.RelatedDocuments) != 1 || source.Insight.RelatedDocuments[0].ID != "doc-2" {
+		t.Fatalf("expected related doc 'doc-2', got %#v", source.Insight.RelatedDocuments)
 	}
 }
 

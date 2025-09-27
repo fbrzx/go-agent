@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	stdpath "path"
 	"path/filepath"
 	"strings"
 
@@ -103,6 +104,10 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		relPath = path
 	}
 	relPath = filepath.ToSlash(relPath)
+	folder := stdpath.Dir(relPath)
+	if folder == "." || folder == "/" {
+		folder = ""
+	}
 
 	content := string(data)
 	title := ExtractTitle(content, filepath.Base(path))
@@ -180,6 +185,7 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		Path:   relPath,
 		Title:  title,
 		SHA:    hashHex,
+		Folder: folder,
 		Chunks: chunkNodes,
 	}
 

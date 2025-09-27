@@ -34,7 +34,20 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
         MATCH (d:Document)
         WHERE d.id IN $ids
         OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
-        RETURN d.id AS id, count(c) AS chunkCount
+        OPTIONAL MATCH (d)-[:IN_FOLDER]->(folder:Folder)
+        OPTIONAL MATCH (folder)<-[:IN_FOLDER]-(related:Document)
+        WITH d,
+             count(DISTINCT c) AS chunkCount,
+             collect(DISTINCT folder.name) AS folders,
+             collect(DISTINCT related) AS relatedNodes
+        WITH d,
+             chunkCount,
+             [f IN folders WHERE f IS NOT NULL] AS folderNames,
+             [r IN relatedNodes WHERE r IS NOT NULL AND r.id <> d.id | {id: r.id, title: r.title, path: r.path}] AS relatedDocs
+        RETURN d.id AS id,
+               chunkCount,
+               folderNames AS folders,
+               relatedDocs AS relatedDocuments
     `, map[string]any{"ids": docIDs})
 	if err != nil {
 		return nil, fmt.Errorf("run neo4j insights query: %w", err)
@@ -45,6 +58,8 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		record := result.Record()
 		id, _ := record.Get("id")
 		count, _ := record.Get("chunkCount")
+		foldersVal, _ := record.Get("folders")
+		relatedVal, _ := record.Get("relatedDocuments")
 		docID, ok := id.(string)
 		if !ok {
 			continue
@@ -56,7 +71,17 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		case int32:
 			chunkCount = int64(v)
 		}
-		insights[docID] = DocumentInsight{ChunkCount: int(chunkCount)}
+		folders := convertStringSlice(foldersVal)
+		relatedDocs, err := convertRelated(relatedVal)
+		if err != nil {
+			return nil, fmt.Errorf("parse related documents: %w", err)
+		}
+
+		insights[docID] = DocumentInsight{
+			ChunkCount:       int(chunkCount),
+			Folders:          folders,
+			RelatedDocuments: relatedDocs,
+		}
 	}
 
 	if err := result.Err(); err != nil {
@@ -67,3 +92,45 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 }
 
 var _ GraphStore = (*Neo4jGraphStore)(nil)
+
+func convertStringSlice(value any) []string {
+	raw, ok := value.([]any)
+	if !ok {
+		if v, ok := value.([]string); ok {
+			return v
+		}
+		return nil
+	}
+
+	result := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok && s != "" {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func convertRelated(value any) ([]RelatedDocument, error) {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil, nil
+	}
+
+	related := make([]RelatedDocument, 0, len(raw))
+	for _, item := range raw {
+		data, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := data["id"].(string)
+		title, _ := data["title"].(string)
+		path, _ := data["path"].(string)
+		if id == "" {
+			continue
+		}
+		related = append(related, RelatedDocument{ID: id, Title: title, Path: path})
+	}
+
+	return related, nil
+}

@@ -158,6 +158,15 @@ func buildContextPrompt(sources []Source) string {
 		if source.Insight.ChunkCount > 0 {
 			sb.WriteString(fmt.Sprintf("Chunks indexed: %d\n", source.Insight.ChunkCount))
 		}
+		if len(source.Insight.Folders) > 0 {
+			sb.WriteString("Folders: " + strings.Join(source.Insight.Folders, ", ") + "\n")
+		}
+		if len(source.Insight.RelatedDocuments) > 0 {
+			sb.WriteString("Related documents:\n")
+			for _, related := range source.Insight.RelatedDocuments {
+				sb.WriteString(fmt.Sprintf("- %s (%s)\n", related.Title, related.Path))
+			}
+		}
 		sb.WriteString(source.Snippet)
 		sb.WriteString("\n\n")
 	}
