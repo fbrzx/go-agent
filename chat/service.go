@@ -76,11 +76,13 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 		return Response{}, fmt.Errorf("vector search: %w", err)
 	}
 
-	if len(chunks) == 0 {
-		return Response{}, fmt.Errorf("no relevant context found for the question")
+	ctxEmpty := len(chunks) == 0
+
+	if ctxEmpty {
+		s.logger.Printf("no context available for question, falling back to LLM-only response")
 	}
 
-	if len(cfg.SectionFilters) > 0 {
+	if len(cfg.SectionFilters) > 0 && !ctxEmpty {
 		filtered := filterChunksBySections(chunks, cfg.SectionFilters)
 		if len(filtered) == 0 {
 			return Response{}, fmt.Errorf("no chunks matched the requested sections")
@@ -94,7 +96,7 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 	}
 
 	insights := map[string]DocumentInsight{}
-	if s.graph != nil {
+	if s.graph != nil && len(docIDs) > 0 {
 		insightMap, insightErr := s.graph.DocumentInsights(ctx, unique(docIDs))
 		if insightErr != nil {
 			s.logger.Printf("graph insights error: %v", insightErr)
@@ -104,7 +106,7 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 	}
 
 	sources := mergeSources(chunks, insights)
-	if len(cfg.TopicFilters) > 0 {
+	if len(cfg.TopicFilters) > 0 && len(sources) > 0 {
 		filteredSources := filterSourcesByTopics(sources, cfg.TopicFilters)
 		if len(filteredSources) == 0 {
 			return Response{}, fmt.Errorf("no documents matched the requested topics")
@@ -112,7 +114,10 @@ func (s *Service) Chat(ctx context.Context, question string, cfg Config) (Respon
 		sources = filteredSources
 	}
 
-	contextPrompt := buildContextPrompt(sources)
+	contextPrompt := ""
+	if len(sources) > 0 {
+		contextPrompt = buildContextPrompt(sources)
+	}
 
 	messages := []llm.Message{
 		{Role: llm.RoleSystem, Content: systemPrompt()},
@@ -215,16 +220,18 @@ func buildContextPrompt(sources []Source) string {
 }
 
 func systemPrompt() string {
-	return "You are a helpful assistant that answers questions using the provided context. If the context does not contain the answer, say that you do not know."
+	return "You are a helpful assistant. Use the supplied context to enrich and support your response, citing Source numbers in brackets (e.g., [Source 1]) when you draw from it. If the context is missing or not useful, rely on your general knowledge, note any uncertainty, and still deliver the best possible answer. Always answer the question first, then optionally add brief context notes."
 }
 
 func formatUserPrompt(question, context string) string {
 	var sb strings.Builder
-	sb.WriteString("Context:\n")
-	sb.WriteString(context)
 	sb.WriteString("Question:\n")
 	sb.WriteString(question)
-	sb.WriteString("\nAnswer concisely using markdown.")
+	if strings.TrimSpace(context) != "" {
+		sb.WriteString("\nContext (optional, may be incomplete):\n")
+		sb.WriteString(context)
+	}
+	sb.WriteString("\nProvide your answer in markdown. Begin with the direct answer. If you reference the context, cite the relevant Source numbers. Conclude with a short 'Context Notes' section only when you actually used the context.")
 	return sb.String()
 }
 

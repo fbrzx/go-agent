@@ -155,15 +155,30 @@ func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Docum
 		if _, err := tx.Run(ctx, `
 			MATCH (d:Document {id: $id})
 			OPTIONAL MATCH (d)-[:HAS_TOPIC]->(docTopic:Topic)
-			WITH d, [topic IN collect(docTopic) WHERE topic IS NOT NULL] AS docTopics
+			WITH d, [topic IN collect(DISTINCT docTopic) WHERE topic IS NOT NULL] AS docTopics
 			UNWIND docTopics AS dt
 			MATCH (dt)<-[:HAS_TOPIC]-(other:Document)
 			WHERE other.id <> d.id
 			WITH d, docTopics, other, collect(DISTINCT dt.name) AS sharedTopics
+			OPTIONAL MATCH (d)-[dcRel:HAS_CHUNK]->(dc:Chunk)
+			WITH d, docTopics, other, sharedTopics,
+			     [pair IN collect(DISTINCT {order: dcRel.order, chunk: dc}) WHERE pair.chunk IS NOT NULL] AS docChunkPairs
+			OPTIONAL MATCH (other)-[ocRel:HAS_CHUNK]->(oc:Chunk)
+			WITH d, docTopics, other, sharedTopics, docChunkPairs,
+			     [pair IN collect(DISTINCT {order: ocRel.order, chunk: oc}) WHERE pair.chunk IS NOT NULL] AS otherChunkPairs
+			WITH d, docTopics, other, sharedTopics, docChunkPairs,
+			     [pair IN docChunkPairs WHERE any(otherPair IN otherChunkPairs WHERE otherPair.order = pair.order)] AS alignedDocPairs
+			WITH d, docTopics, other, sharedTopics, docChunkPairs, alignedDocPairs,
+			     toFloat(size(alignedDocPairs)) AS overlapCount,
+			     toFloat(size(docChunkPairs)) AS docChunkCount
 			MERGE (d)-[rel:RELATED_TOPIC]->(other)
 			SET rel.names = sharedTopics,
 			    rel.weight = toFloat(size(sharedTopics)),
-			    rel.score = CASE WHEN size(docTopics) = 0 THEN 0 ELSE toFloat(size(sharedTopics)) / toFloat(size(docTopics)) END
+			    rel.similarity = CASE WHEN docChunkCount = 0 THEN 0.0 ELSE overlapCount / docChunkCount END,
+			    rel.score = CASE
+			        WHEN size(docTopics) = 0 THEN rel.similarity
+			        ELSE (CASE WHEN docChunkCount = 0 THEN 0.0 ELSE overlapCount / docChunkCount END + toFloat(size(sharedTopics)) / toFloat(size(docTopics))) / 2.0
+			    END
 		`, map[string]any{"id": doc.ID}); err != nil {
 			return nil, fmt.Errorf("link related topics: %w", err)
 		}

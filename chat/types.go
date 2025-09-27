@@ -21,11 +21,12 @@ type DocumentInsight struct {
 }
 
 type RelatedDocument struct {
-	ID     string
-	Title  string
-	Path   string
-	Weight float64
-	Reason string
+	ID         string
+	Title      string
+	Path       string
+	Weight     float64
+	Similarity float64
+	Reason     string
 }
 
 type SectionInfo struct {

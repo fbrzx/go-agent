@@ -19,4 +19,5 @@ vendor/
 # Environment files
 .env
 
-documents
+documents/
+bin/

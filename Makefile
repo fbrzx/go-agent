@@ -3,11 +3,11 @@ ENV_FILE ?= .env
 TEST_PKGS := ./tests/...
 INCLUDE_INTEGRATION ?= 0
 BINARY := go-agent
-INGEST_ARGS ?=
+TRAIN_ARGS ?=
 CHAT_ARGS ?=
 CLEAR_ARGS ?=
 
-.PHONY: test build ingest run clear
+.PHONY: test build train chat clear
 
 ## test: Run Go tests under ./tests. Set INCLUDE_INTEGRATION=1 to enable integration checks.
 test:
@@ -32,16 +32,16 @@ build:
 	@mkdir -p bin
 	go build -o bin/$(BINARY) .
 
-## ingest: Execute the ingestion command, sourcing variables from $(ENV_FILE) if present.
-ingest:
-	@echo "Running $(BINARY) ingest"
+## train: Execute the ingestion command, sourcing variables from $(ENV_FILE) if present.
+train:
+	@echo "Running $(BINARY) train"
 	@( set -a; \
 	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
 	   set +a; \
-	   go run . ingest $(INGEST_ARGS) )
+	   go run . ingest $(TRAIN_ARGS) )
 
-## run: Execute the chat command, sourcing variables from $(ENV_FILE) if present.
-run:
+## chat: Execute the chat command, sourcing variables from $(ENV_FILE) if present.
+chat:
 	@echo "Running $(BINARY) chat"
 	@( set -a; \
 	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \

@@ -41,6 +41,10 @@ func TestVectorSearchRanking(t *testing.T) {
 	chunkA := uuid.New()
 	chunkB := uuid.New()
 
+	if _, err := pool.Exec(ctx, "DELETE FROM rag_documents WHERE source_path = ANY($1)", []string{"test/docA.md", "test/docB.md"}); err != nil {
+		t.Fatalf("cleanup documents: %v", err)
+	}
+
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM rag_documents WHERE id = ANY($1)", []uuid.UUID{docA, docB})
 	})

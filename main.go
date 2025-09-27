@@ -83,8 +83,10 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 	flags := flag.NewFlagSet("chat", flag.ExitOnError)
 	question := flags.String("question", "", "question to ask the agent")
 	limit := flags.Int("limit", 5, "number of context chunks to retrieve")
-	sectionFilter := flags.String("sections", "", "comma-separated section titles or numbers to filter context")
-	topicFilter := flags.String("topics", "", "comma-separated topic names to filter context")
+	sectionFilters := multiFlag{}
+	topicFilters := multiFlag{}
+	flags.Var(&sectionFilters, "sections", "section filter (repeatable)")
+	flags.Var(&topicFilters, "topics", "topic filter (repeatable)")
 	if err := flags.Parse(args); err != nil {
 		logger.Fatalf("parse chat flags: %v", err)
 	}
@@ -131,8 +133,8 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 
 	resp, err := svc.Chat(ctx, *question, chat.Config{
 		SimilarityLimit: *limit,
-		SectionFilters:  parseCSVList(*sectionFilter),
-		TopicFilters:    parseCSVList(*topicFilter),
+		SectionFilters:  sectionFilters.values,
+		TopicFilters:    topicFilters.values,
 	})
 	if err != nil {
 		logger.Fatalf("chat failed: %v", err)
@@ -141,6 +143,12 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 	fmt.Println(resp.Answer)
 	if len(resp.Sources) > 0 {
 		fmt.Println()
+		if len(sectionFilters.values) > 0 {
+			fmt.Printf("Filters (sections): %s\n", strings.Join(sectionFilters.values, ", "))
+		}
+		if len(topicFilters.values) > 0 {
+			fmt.Printf("Filters (topics): %s\n", strings.Join(topicFilters.values, ", "))
+		}
 		fmt.Println("Sources:")
 		for idx, source := range resp.Sources {
 			fmt.Printf("%d. %s (%s)\n", idx+1, source.Title, source.Path)
@@ -171,6 +179,9 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 					extra := ""
 					if related.Weight > 0 {
 						extra += fmt.Sprintf(" weight %.2f", related.Weight)
+					}
+					if related.Similarity > 0 {
+						extra += fmt.Sprintf(" sim %.2f", related.Similarity)
 					}
 					if related.Reason != "" {
 						extra += fmt.Sprintf(" via %s", related.Reason)
@@ -264,18 +275,22 @@ func printUsage() {
 	fmt.Println("  clear    Remove ingested data from Postgres/Neo4j")
 }
 
-func parseCSVList(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
+type multiFlag struct {
+	values []string
+}
+
+func (m *multiFlag) String() string {
+	if m == nil {
+		return ""
+	}
+	return strings.Join(m.values, ",")
+}
+
+func (m *multiFlag) Set(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
 		return nil
 	}
-	parts := strings.Split(value, ",")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
+	m.values = append(m.values, trimmed)
+	return nil
 }

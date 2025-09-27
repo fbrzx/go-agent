@@ -152,8 +152,12 @@ func TestChatServiceHandlesNoResults(t *testing.T) {
 		log.New(io.Discard, "", 0),
 	)
 
-	if _, err := svc.Chat(context.Background(), "question", chat.Config{}); err == nil {
-		t.Fatal("expected error when no context is found")
+	resp, err := svc.Chat(context.Background(), "question", chat.Config{})
+	if err != nil {
+		t.Fatalf("expected fallback to LLM without context, got %v", err)
+	}
+	if resp.Answer == "" {
+		t.Fatal("expected LLM answer even with empty context")
 	}
 }
 

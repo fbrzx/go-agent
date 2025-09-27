@@ -42,7 +42,7 @@ func (s *Neo4jGraphStore) DocumentInsights(ctx context.Context, docIDs []string)
 		     count(DISTINCT c) AS chunkCount,
 		     collect(DISTINCT folder.name) AS folders,
 		     collect(DISTINCT CASE WHEN relatedFolderDoc IS NULL THEN NULL ELSE {id: relatedFolderDoc.id, title: relatedFolderDoc.title, path: relatedFolderDoc.path, weight: 0.1, reason: 'folder'} END) AS folderRelated,
-		     collect(DISTINCT CASE WHEN relatedTopicDoc IS NULL THEN NULL ELSE {id: relatedTopicDoc.id, title: relatedTopicDoc.title, path: relatedTopicDoc.path, weight: COALESCE(rt.score, rt.weight, 0.0), reason: 'topic'} END) AS topicRelated,
+		     collect(DISTINCT CASE WHEN relatedTopicDoc IS NULL THEN NULL ELSE {id: relatedTopicDoc.id, title: relatedTopicDoc.title, path: relatedTopicDoc.path, weight: COALESCE(rt.score, rt.weight, 0.0), similarity: COALESCE(rt.similarity, 0.0), reason: 'topic'} END) AS topicRelated,
 		     collect(DISTINCT topic.name) AS topicNames,
 		     secRel,
 		     section
@@ -159,8 +159,9 @@ func convertRelated(value any) ([]RelatedDocument, error) {
 		}
 		seen[id] = struct{}{}
 		weight, _ := toFloat(data["weight"])
+		similarity, _ := toFloat(data["similarity"])
 		reason, _ := data["reason"].(string)
-		related = append(related, RelatedDocument{ID: id, Title: title, Path: path, Weight: weight, Reason: reason})
+		related = append(related, RelatedDocument{ID: id, Title: title, Path: path, Weight: weight, Similarity: similarity, Reason: reason})
 	}
 
 	return related, nil

@@ -47,16 +47,16 @@ set +a
 2. Place Markdown documents in the directory configured by `DATA_DIR` (default `./documents`).
 3. Run the ingestion pipeline:
    ```sh
-   make ingest
+   make train
    ```
-   Add `INGEST_ARGS="--dir ./other/path"` to ingest a different folder.
+   Add `TRAIN_ARGS="--dir ./other/path"` to ingest a different folder.
 4. Ask the agent a question over the indexed knowledge base:
    ```sh
-   make run CHAT_ARGS="--question 'What is our adoption strategy?'"
+   make chat CHAT_ARGS="--question 'What is our adoption strategy?'"
    ```
-   Omit `--question` to be prompted interactively. Use `--limit` to adjust how many chunks feed the answer. Add `--topics` or `--sections` (comma-separated) to constrain the response context:
+   Omit `--question` to be prompted interactively. Use `--limit` to adjust how many chunks feed the answer. Add repeated `--topics` or `--sections` flags to constrain the response context:
    ```sh
-   make run CHAT_ARGS="--question 'Summarise adoption' --topics adoption,onboarding --sections introduction"
+   make chat CHAT_ARGS="--question 'Summarise adoption' --topics adoption --topics onboarding --sections introduction"
    ```
 5. Clear previously ingested data (requires confirmation):
    ```sh
@@ -74,8 +74,8 @@ Behind the scenes the command:
 
 ## Development Tasks
 
-- `make ingest` – run the CLI with optional `INGEST_ARGS` overrides (e.g., `--dir`).
-- `make run` – query the agent; combine with `CHAT_ARGS="--question '...'"`.
+- `make train` – run the CLI with optional `TRAIN_ARGS` overrides (e.g., `--dir`).
+- `make chat` – query the agent; combine with `CHAT_ARGS="--question '...'"`.
 - `make clear` – wipe Postgres tables and Neo4j graph (`CONFIRM=1` to bypass the prompt).
 - `make test` – run unit tests (set `INCLUDE_INTEGRATION=1` to exercise live DB connectivity).
 - `make build` – refresh modules and build `bin/go-agent`.
