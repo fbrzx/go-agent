@@ -1,50 +1,75 @@
 # go-agent
 
-A minimal Go application augmented with PostgreSQL + pgvector and Neo4j clients. The program loads connection settings, attempts to initialise both drivers, and logs any connectivity issues.
+Agentic RAG scaffold for experimenting with Markdown knowledge bases. The project ingests `.md` files, chunks and embeds their contents into Postgres (with pgvector), and mirrors the knowledge structure inside Neo4j. Embedding generation is pluggable so you can point the pipeline at local Ollama models or hosted OpenAI APIs.
 
 ## Prerequisites
 
-- Go 1.20 or later
-- (Optional) Running PostgreSQL with the pgvector extension enabled
-- (Optional) Running Neo4j 5.x
+- Go 1.20+
+- PostgreSQL 15+ with the `vector` extension (pgvector)
+- Neo4j 5.x
+- Optional but default: [Ollama](https://ollama.com) running locally with the `llama3.1:8b` and `nomic-embed-text` models pulled
+- Optional: OpenAI API access when using hosted models
 
 ## Configuration
 
-Connection settings are supplied via environment variables and fall back to useful local defaults:
+All runtime settings can be stored in `.env` (already git-ignored). Defaults favour a fully local stack.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `POSTGRES_DSN` | `postgres://localhost:5432/go-agent?sslmode=disable` | PostgreSQL connection string |
-| `NEO4J_URI` | `neo4j://localhost:7687` | Neo4j bolt URI |
+| `POSTGRES_DSN` | `postgres://localhost:5432/go-agent?sslmode=disable` | Postgres connection string |
+| `NEO4J_URI` | `neo4j://localhost:7687` | Neo4j Bolt endpoint |
 | `NEO4J_USERNAME` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | `password` | Neo4j password |
+| `DATA_DIR` | `./documents` | Where Markdown sources live |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama HTTP endpoint |
+| `LLM_PROVIDER` | `ollama` (`ollama`\|`openai`) | Conversational model provider |
+| `LLM_MODEL` | `llama3.1:8b` | Chat/agent model name |
+| `EMBEDDING_PROVIDER` | `ollama` (`ollama`\|`openai`) | Embedding provider |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model name |
+| `EMBEDDING_DIMENSION` | `768` | Vector dimension to store in pgvector |
+| `OPENAI_API_KEY` | _unset_ | Required when `*_PROVIDER=openai` |
+| `OPENAI_BASE_URL` | _unset_ | Override for Azure/OpenAI-compatible endpoints |
 
-Override these before running the application if you have non-default credentials:
+Update `.env` and export the file before building or testing:
 
 ```sh
-export POSTGRES_DSN="postgres://user:pass@db-host:5432/yourdb?sslmode=require"
-export NEO4J_URI="neo4j+s://graph-host:7687"
-export NEO4J_USERNAME="graph"
-export NEO4J_PASSWORD="super-secret"
+set -a
+. ./.env
+set +a
 ```
 
-## Getting Started
+## Usage
 
-1. Ensure modules are in sync:
+1. Install Go dependencies and compile the binary:
    ```sh
-   go mod tidy
+   make build
    ```
-2. Run the application:
+2. Place Markdown documents in the directory configured by `DATA_DIR` (default `./documents`).
+3. Run the ingestion pipeline:
    ```sh
-   go run .
+   make ingest
    ```
-   If the databases are not reachable, the program logs a warning and continues.
+   Add `ARGS="--dir ./other/path"` to ingest a different folder.
+
+Behind the scenes the command:
+- Ensures the `vector` extension and RAG tables exist in Postgres.
+- Splits Markdown into overlapping chunks.
+- Generates embeddings through the configured provider.
+- Stores vectors inside `rag_chunks` and mirrors document/chunk relationships in Neo4j.
+
+## Development Tasks
+
+- `make run CMD=ingest` – run the CLI with optional `ARGS` overrides.
+- `make test` – run unit tests (set `INCLUDE_INTEGRATION=1` to exercise live DB connectivity).
+- `make build` – refresh modules and build `bin/go-agent`.
 
 ## Project Layout
 
-- `main.go` – entry point that loads config and wires up the database clients.
-- `config/config.go` – lightweight configuration loader for database settings.
-- `database/connections.go` – helpers for creating PostgreSQL pools and Neo4j drivers.
-- `go.mod` / `go.sum` – module definition and dependencies.
+- `config/` – environment-driven configuration and defaults.
+- `database/` – connection helpers plus schema bootstrapping for pgvector tables.
+- `embeddings/` – pluggable clients for Ollama and OpenAI embeddings.
+- `ingestion/` – document chunking logic and persistence into Postgres/Neo4j.
+- `knowledge/` – Neo4j graph synchronisation helpers.
+- `tests/integration/` – opt-in connectivity tests for Postgres and Neo4j.
 
-Extend this skeleton with your own repositories, commands, and tests as needed.
+Extend this scaffold with retrieval/query handlers, agent loops, or additional knowledge graph relationships as your RAG workflows evolve.

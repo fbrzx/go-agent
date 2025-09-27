@@ -3,9 +3,11 @@ module github.com/fabfab/go-agent
 go 1.25.1
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
 	github.com/pgvector/pgvector-go v0.3.0
+	github.com/sashabaranov/go-openai v1.41.2
 )
 
 require (

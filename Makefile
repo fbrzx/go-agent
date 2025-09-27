@@ -3,8 +3,10 @@ ENV_FILE ?= .env
 TEST_PKGS := ./tests/...
 INCLUDE_INTEGRATION ?= 0
 BINARY := go-agent
+CMD ?= ingest
+ARGS ?=
 
-.PHONY: test build run
+.PHONY: test build run ingest
 
 ## test: Run Go tests under ./tests. Set INCLUDE_INTEGRATION=1 to enable integration checks.
 test:
@@ -26,12 +28,17 @@ test:
 build:
 	@echo "Tidying modules and building $(BINARY)"
 	go mod tidy
+	@mkdir -p bin
 	go build -o bin/$(BINARY) .
 
-## run: Execute the application, sourcing variables from $(ENV_FILE) if present.
+## run: Execute the application command, sourcing variables from $(ENV_FILE) if present.
 run:
-	@echo "Running $(BINARY)"
+	@echo "Running $(BINARY) (command: $(CMD))"
 	@( set -a; \
 	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
 	   set +a; \
-	   go run . )
+	   go run . $(CMD) $(ARGS) )
+
+## ingest: Convenience wrapper around `make run CMD=ingest`.
+ingest:
+	@$(MAKE) run CMD=ingest ARGS="$(ARGS)"

@@ -1,0 +1,76 @@
+package knowledge
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+)
+
+type Document struct {
+	ID     string
+	Path   string
+	Title  string
+	SHA    string
+	Chunks []Chunk
+}
+
+type Chunk struct {
+	ID    string
+	Index int
+	Text  string
+}
+
+func SyncDocument(ctx context.Context, driver neo4j.DriverWithContext, doc Document) error {
+	if driver == nil {
+		return fmt.Errorf("neo4j driver is nil")
+	}
+
+	session := driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		if _, err := tx.Run(ctx, `
+			MERGE (d:Document {id: $id})
+			SET d.path = $path,
+			    d.title = $title,
+			    d.sha256 = $sha,
+			    d.updated_at = datetime()
+		`, map[string]any{
+			"id":    doc.ID,
+			"path":  doc.Path,
+			"title": doc.Title,
+			"sha":   doc.SHA,
+		}); err != nil {
+			return nil, fmt.Errorf("upsert document node: %w", err)
+		}
+
+		if _, err := tx.Run(ctx, `
+			MATCH (d:Document {id: $id})-[:HAS_CHUNK]->(c:Chunk)
+			DETACH DELETE c
+		`, map[string]any{"id": doc.ID}); err != nil {
+			return nil, fmt.Errorf("clear existing chunk nodes: %w", err)
+		}
+
+		for _, chunk := range doc.Chunks {
+			if _, err := tx.Run(ctx, `
+				MATCH (d:Document {id: $doc_id})
+				MERGE (c:Chunk {id: $chunk_id})
+				SET c.index = $chunk_index,
+				    c.text = $chunk_text
+				MERGE (d)-[:HAS_CHUNK {order: $chunk_index}]->(c)
+			`, map[string]any{
+				"doc_id":      doc.ID,
+				"chunk_id":    chunk.ID,
+				"chunk_index": chunk.Index,
+				"chunk_text":  chunk.Text,
+			}); err != nil {
+				return nil, fmt.Errorf("upsert chunk node: %w", err)
+			}
+		}
+
+		return nil, nil
+	})
+
+	return err
+}
