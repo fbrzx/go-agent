@@ -2,6 +2,8 @@ package unit
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,6 +53,206 @@ func TestIngestDirectoryMissingEmbedder(t *testing.T) {
 	if err := svc.IngestDirectory(context.Background(), "./does-not-matter"); err == nil {
 		t.Fatal("expected error when embedder is nil")
 	}
+}
+
+func TestIngestDocumentFromBytes(t *testing.T) {
+	t.Parallel()
+
+	content := "# Doc Title\n\n## Topic One\n\nParagraph one.\n\nParagraph two that should stay in the same chunk." +
+		"\n\n## Topic Two\n\nMore content here."
+
+	embed := &mockEmbedder{}
+	svc := ingestion.NewService(nil, nil, embed, nil, 1)
+
+	res, err := svc.IngestDocument(context.Background(), ingestion.DocumentPayload{
+		Path: "memory/doc.md",
+		Data: []byte(content),
+	})
+	if err != nil {
+		t.Fatalf("ingest document: %v", err)
+	}
+
+	if res == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if want := "Doc Title"; res.Title != want {
+		t.Fatalf("unexpected title: want %q, got %q", want, res.Title)
+	}
+
+	if want := "memory/doc.md"; res.RelPath != want {
+		t.Fatalf("unexpected rel path: want %q, got %q", want, res.RelPath)
+	}
+
+	expectedFragments, expectedSections, expectedTopics := ingestion.ChunkMarkdown(content, 1000, 200)
+	if len(res.Fragments) != len(expectedFragments) {
+		t.Fatalf("unexpected fragment count: want %d, got %d", len(expectedFragments), len(res.Fragments))
+	}
+
+	for i, fragment := range res.Fragments {
+		if fragment.Text != expectedFragments[i].Text {
+			t.Fatalf("fragment %d text mismatch: want %q, got %q", i, expectedFragments[i].Text, fragment.Text)
+		}
+		if fragment.Section != expectedFragments[i].Section {
+			t.Fatalf("fragment %d section mismatch: want %+v, got %+v", i, expectedFragments[i].Section, fragment.Section)
+		}
+	}
+
+	if len(res.Sections) != len(expectedSections) {
+		t.Fatalf("unexpected section count: want %d, got %d", len(expectedSections), len(res.Sections))
+	}
+
+	for i, section := range res.Sections {
+		if section != expectedSections[i] {
+			t.Fatalf("section %d mismatch: want %+v, got %+v", i, expectedSections[i], section)
+		}
+	}
+
+	if len(res.Topics) != len(expectedTopics) {
+		t.Fatalf("unexpected topic count: want %d, got %d", len(expectedTopics), len(res.Topics))
+	}
+
+	for i, topic := range res.Topics {
+		if topic != expectedTopics[i] {
+			t.Fatalf("topic %d mismatch: want %+v, got %+v", i, expectedTopics[i], topic)
+		}
+	}
+
+	if embed.calls != 1 {
+		t.Fatalf("expected embedder to be invoked once, got %d", embed.calls)
+	}
+
+	for i, text := range embed.lastTexts {
+		if text != expectedFragments[i].Text {
+			t.Fatalf("embed input %d mismatch: want %q, got %q", i, expectedFragments[i].Text, text)
+		}
+		if len(res.Embeddings[i]) != 1 {
+			t.Fatalf("embedding %d length mismatch: want 1, got %d", i, len(res.Embeddings[i]))
+		}
+		if got := res.Embeddings[i][0]; got != float32(len(text)) {
+			t.Fatalf("embedding %d value mismatch: want %f, got %f", i, float32(len(text)), got)
+		}
+	}
+}
+
+func TestIngestDocumentMatchesDiskIngestion(t *testing.T) {
+	t.Parallel()
+
+	content := "# Disk Title\n\n## Disk Topic\n\nFirst paragraph.\n\nSecond paragraph that should overlap across chunks for the test." +
+		"\n\n## Another Topic\n\nClosing paragraph."
+
+	directEmbed := &mockEmbedder{}
+	directSvc := ingestion.NewService(nil, nil, directEmbed, nil, 1)
+
+	directRes, err := directSvc.IngestDocument(context.Background(), ingestion.DocumentPayload{
+		Path: "virtual/file.md",
+		Data: []byte(content),
+	})
+	if err != nil {
+		t.Fatalf("direct ingest: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	diskDir := filepath.Join(tmpDir, "docs")
+	if err := os.MkdirAll(diskDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	diskPath := filepath.Join(diskDir, "file.md")
+	if err := os.WriteFile(diskPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	bytesFromDisk, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+
+	diskEmbed := &mockEmbedder{}
+	diskSvc := ingestion.NewService(nil, nil, diskEmbed, nil, 1)
+
+	diskRes, err := diskSvc.IngestDocument(context.Background(), ingestion.DocumentPayload{
+		Root: tmpDir,
+		Path: diskPath,
+		Data: bytesFromDisk,
+	})
+	if err != nil {
+		t.Fatalf("disk ingest: %v", err)
+	}
+
+	if want := "docs/file.md"; diskRes.RelPath != want {
+		t.Fatalf("unexpected rel path: want %q, got %q", want, diskRes.RelPath)
+	}
+
+	if want := "docs"; diskRes.Folder != want {
+		t.Fatalf("unexpected folder: want %q, got %q", want, diskRes.Folder)
+	}
+
+	if diskRes.Title != directRes.Title {
+		t.Fatalf("title mismatch: direct %q, disk %q", directRes.Title, diskRes.Title)
+	}
+
+	if diskRes.Hash != directRes.Hash {
+		t.Fatalf("hash mismatch: direct %q, disk %q", directRes.Hash, diskRes.Hash)
+	}
+
+	if len(diskRes.Fragments) != len(directRes.Fragments) {
+		t.Fatalf("fragment count mismatch: direct %d, disk %d", len(directRes.Fragments), len(diskRes.Fragments))
+	}
+
+	for i, fragment := range diskRes.Fragments {
+		if fragment.Text != directRes.Fragments[i].Text {
+			t.Fatalf("fragment %d text mismatch: direct %q, disk %q", i, directRes.Fragments[i].Text, fragment.Text)
+		}
+		if fragment.Section != directRes.Fragments[i].Section {
+			t.Fatalf("fragment %d section mismatch: direct %+v, disk %+v", i, directRes.Fragments[i].Section, fragment.Section)
+		}
+	}
+
+	if len(diskRes.Topics) != len(directRes.Topics) {
+		t.Fatalf("topic count mismatch: direct %d, disk %d", len(directRes.Topics), len(diskRes.Topics))
+	}
+
+	for i, topic := range diskRes.Topics {
+		if topic != directRes.Topics[i] {
+			t.Fatalf("topic %d mismatch: direct %+v, disk %+v", i, directRes.Topics[i], topic)
+		}
+	}
+
+	if len(diskRes.Sections) != len(directRes.Sections) {
+		t.Fatalf("section count mismatch: direct %d, disk %d", len(directRes.Sections), len(diskRes.Sections))
+	}
+
+	for i, section := range diskRes.Sections {
+		if section != directRes.Sections[i] {
+			t.Fatalf("section %d mismatch: direct %+v, disk %+v", i, directRes.Sections[i], section)
+		}
+	}
+
+	if len(diskEmbed.lastTexts) != len(directEmbed.lastTexts) {
+		t.Fatalf("embed texts length mismatch: direct %d, disk %d", len(directEmbed.lastTexts), len(diskEmbed.lastTexts))
+	}
+
+	for i, text := range diskEmbed.lastTexts {
+		if text != directEmbed.lastTexts[i] {
+			t.Fatalf("embed text %d mismatch: direct %q, disk %q", i, directEmbed.lastTexts[i], text)
+		}
+	}
+}
+
+type mockEmbedder struct {
+	calls     int
+	lastTexts []string
+}
+
+func (m *mockEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	m.calls++
+	m.lastTexts = append([]string(nil), texts...)
+	embeddings := make([][]float32, len(texts))
+	for i, text := range texts {
+		embeddings[i] = []float32{float32(len(text))}
+	}
+	return embeddings, nil
 }
 
 func TestChunkMarkdownHandlesEmpty(t *testing.T) {
