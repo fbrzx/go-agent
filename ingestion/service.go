@@ -37,6 +37,34 @@ type Service struct {
 	dimension int
 }
 
+// DocumentPayload represents the data required to ingest a markdown document.
+type DocumentPayload struct {
+	// Root is the directory that should be treated as the ingestion root. It is
+	// used to compute the document's relative path. When empty, the document
+	// path is used as-is.
+	Root string
+	// Path is the absolute or virtual path associated with the document.
+	Path string
+	// Data contains the raw markdown bytes of the document.
+	Data []byte
+}
+
+// DocumentResult contains the parsed metadata and embeddings generated during
+// ingestion. It is the in-memory representation of the document before it is
+// persisted to storage backends.
+type DocumentResult struct {
+	RelPath    string
+	Folder     string
+	Title      string
+	Hash       string
+	Fragments  []ChunkFragment
+	Sections   []SectionMeta
+	Topics     []TopicMeta
+	Embeddings [][]float32
+}
+
+var errNoChunks = errors.New("document produced no chunks")
+
 type ChunkFragment struct {
 	Text    string
 	Section SectionMeta
@@ -64,6 +92,68 @@ func NewService(pool *pgxpool.Pool, driver neo4j.DriverWithContext, embedder emb
 		logger:    logger,
 		dimension: dimension,
 	}
+}
+
+// IngestDocument chunks the provided markdown payload, generates embeddings for
+// each chunk, and returns the in-memory representation that would be persisted
+// by the service. It does not perform any database or knowledge graph writes,
+// making it suitable for unit testing and in-memory ingestion flows.
+func (s *Service) IngestDocument(ctx context.Context, payload DocumentPayload) (*DocumentResult, error) {
+	if s.embedder == nil {
+		return nil, fmt.Errorf("embedder not configured")
+	}
+	if payload.Path == "" {
+		return nil, fmt.Errorf("document path is required")
+	}
+
+	data := payload.Data
+	relPath := payload.Path
+	if payload.Root != "" {
+		if candidate, err := filepath.Rel(payload.Root, payload.Path); err == nil {
+			relPath = candidate
+		}
+	}
+	relPath = filepath.ToSlash(relPath)
+
+	folder := stdpath.Dir(relPath)
+	if folder == "." || folder == "/" {
+		folder = ""
+	}
+
+	content := string(data)
+	title := ExtractTitle(content, filepath.Base(payload.Path))
+	hash := sha256.Sum256(data)
+	hashHex := hex.EncodeToString(hash[:])
+
+	fragments, sectionsMeta, topicsMeta := ChunkMarkdown(content, defaultChunkSize, defaultChunkOverlap)
+	if len(fragments) == 0 {
+		return nil, errNoChunks
+	}
+
+	texts := make([]string, len(fragments))
+	for i, fragment := range fragments {
+		texts[i] = fragment.Text
+	}
+
+	embeddings, err := s.embedder.Embed(ctx, texts)
+	if err != nil {
+		return nil, fmt.Errorf("generate embeddings: %w", err)
+	}
+
+	if len(embeddings) != len(fragments) {
+		return nil, fmt.Errorf("embedding count mismatch: have %d chunks, %d embeddings", len(fragments), len(embeddings))
+	}
+
+	return &DocumentResult{
+		RelPath:    relPath,
+		Folder:     folder,
+		Title:      title,
+		Hash:       hashHex,
+		Fragments:  fragments,
+		Sections:   sectionsMeta,
+		Topics:     topicsMeta,
+		Embeddings: embeddings,
+	}, nil
 }
 
 func (s *Service) IngestDirectory(ctx context.Context, dir string) error {
@@ -114,39 +204,13 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		return fmt.Errorf("read file: %w", err)
 	}
 
-	relPath, relErr := filepath.Rel(root, path)
-	if relErr != nil {
-		relPath = path
-	}
-	relPath = filepath.ToSlash(relPath)
-	folder := stdpath.Dir(relPath)
-	if folder == "." || folder == "/" {
-		folder = ""
-	}
-
-	content := string(data)
-	title := ExtractTitle(content, filepath.Base(path))
-	hash := sha256.Sum256(data)
-	hashHex := hex.EncodeToString(hash[:])
-
-	fragments, sectionsMeta, topicsMeta := ChunkMarkdown(content, defaultChunkSize, defaultChunkOverlap)
-	if len(fragments) == 0 {
-		s.logger.Printf("skip empty document %s", path)
-		return nil
-	}
-
-	texts := make([]string, len(fragments))
-	for i, fragment := range fragments {
-		texts[i] = fragment.Text
-	}
-
-	embeddings, err := s.embedder.Embed(ctx, texts)
+	result, err := s.IngestDocument(ctx, DocumentPayload{Root: root, Path: path, Data: data})
 	if err != nil {
-		return fmt.Errorf("generate embeddings: %w", err)
-	}
-
-	if len(embeddings) != len(fragments) {
-		return fmt.Errorf("embedding count mismatch: have %d chunks, %d embeddings", len(fragments), len(embeddings))
+		if errors.Is(err, errNoChunks) {
+			s.logger.Printf("skip empty document %s", path)
+			return nil
+		}
+		return err
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -161,14 +225,14 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		}
 	}()
 
-	docID, changed, err := upsertDocument(ctx, tx, relPath, title, hashHex)
+	docID, changed, err := upsertDocument(ctx, tx, result.RelPath, result.Title, result.Hash)
 	if err != nil {
 		return err
 	}
 
 	sectionIDs := map[int]string{}
-	sections := make([]knowledge.Section, 0, len(sectionsMeta))
-	for _, sectionMeta := range sectionsMeta {
+	sections := make([]knowledge.Section, 0, len(result.Sections))
+	for _, sectionMeta := range result.Sections {
 		id := uuid.New().String()
 		sections = append(sections, knowledge.Section{
 			ID:    id,
@@ -179,22 +243,22 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		sectionIDs[sectionMeta.Order] = id
 	}
 
-	topics := make([]knowledge.Topic, 0, len(topicsMeta))
-	for _, topicMeta := range topicsMeta {
+	topics := make([]knowledge.Topic, 0, len(result.Topics))
+	for _, topicMeta := range result.Topics {
 		if topicMeta.Name == "" {
 			continue
 		}
 		topics = append(topics, knowledge.Topic{Name: topicMeta.Name})
 	}
 
-	chunkNodes := make([]knowledge.Chunk, 0, len(fragments))
+	chunkNodes := make([]knowledge.Chunk, 0, len(result.Fragments))
 
 	if changed {
 		if _, err = tx.Exec(ctx, "DELETE FROM rag_chunks WHERE document_id = $1", docID); err != nil {
 			return fmt.Errorf("clear existing chunks: %w", err)
 		}
 
-		for idx, fragment := range fragments {
+		for idx, fragment := range result.Fragments {
 			chunkID := uuid.New()
 			chunkNodes = append(chunkNodes, knowledge.Chunk{
 				ID:        chunkID.String(),
@@ -203,11 +267,11 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 				SectionID: sectionIDs[fragment.Section.Order],
 			})
 
-			vec := pgvector.NewVector(embeddings[idx])
+			vec := pgvector.NewVector(result.Embeddings[idx])
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO rag_chunks (id, document_id, chunk_index, section_order, section_level, section_title, content, embedding, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-			`, chunkID, docID, idx, fragment.Section.Order, fragment.Section.Level, fragment.Section.Title, fragment.Text, vec); err != nil {
+                                INSERT INTO rag_chunks (id, document_id, chunk_index, section_order, section_level, section_title, content, embedding, created_at, updated_at)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+                        `, chunkID, docID, idx, fragment.Section.Order, fragment.Section.Level, fragment.Section.Title, fragment.Text, vec); err != nil {
 				return fmt.Errorf("insert chunk %d: %w", idx, err)
 			}
 		}
@@ -218,16 +282,16 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 	}
 
 	if len(chunkNodes) == 0 {
-		s.logger.Printf("no updates required for %s", relPath)
+		s.logger.Printf("no updates required for %s", result.RelPath)
 		return nil
 	}
 
 	doc := knowledge.Document{
 		ID:       docID.String(),
-		Path:     relPath,
-		Title:    title,
-		SHA:      hashHex,
-		Folder:   folder,
+		Path:     result.RelPath,
+		Title:    result.Title,
+		SHA:      result.Hash,
+		Folder:   result.Folder,
 		Chunks:   chunkNodes,
 		Sections: sections,
 		Topics:   topics,
@@ -237,7 +301,7 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		return fmt.Errorf("sync knowledge graph: %w", err)
 	}
 
-	s.logger.Printf("ingested %s (%d chunks)", relPath, len(chunkNodes))
+	s.logger.Printf("ingested %s (%d chunks)", result.RelPath, len(chunkNodes))
 	return nil
 }
 
