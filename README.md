@@ -49,7 +49,17 @@ set +a
    ```sh
    make ingest
    ```
-   Add `ARGS="--dir ./other/path"` to ingest a different folder.
+   Add `INGEST_ARGS="--dir ./other/path"` to ingest a different folder.
+4. Ask the agent a question over the indexed knowledge base:
+   ```sh
+   make run CHAT_ARGS="--question 'What is our adoption strategy?'"
+   ```
+   Omit `--question` to be prompted interactively. Use `--limit` to adjust how many chunks feed the answer.
+5. Clear previously ingested data (requires confirmation):
+   ```sh
+   make clear
+   ```
+   Run `make clear CONFIRM=1` to skip the confirmation prompt.
 
 Behind the scenes the command:
 - Ensures the `vector` extension and RAG tables exist in Postgres.
@@ -59,7 +69,9 @@ Behind the scenes the command:
 
 ## Development Tasks
 
-- `make run CMD=ingest` – run the CLI with optional `ARGS` overrides.
+- `make ingest` – run the CLI with optional `INGEST_ARGS` overrides (e.g., `--dir`).
+- `make run` – query the agent; combine with `CHAT_ARGS="--question '...'"`.
+- `make clear` – wipe Postgres tables and Neo4j graph (`CONFIRM=1` to bypass the prompt).
 - `make test` – run unit tests (set `INCLUDE_INTEGRATION=1` to exercise live DB connectivity).
 - `make build` – refresh modules and build `bin/go-agent`.
 
@@ -68,6 +80,8 @@ Behind the scenes the command:
 - `config/` – environment-driven configuration and defaults.
 - `database/` – connection helpers plus schema bootstrapping for pgvector tables.
 - `embeddings/` – pluggable clients for Ollama and OpenAI embeddings.
+- `llm/` – language-model clients matching the same provider choices.
+- `chat/` – retrieval augmented chat orchestration tying vectors, graph insights, and LLM completions together.
 - `ingestion/` – document chunking logic and persistence into Postgres/Neo4j.
 - `knowledge/` – Neo4j graph synchronisation helpers.
 - `tests/integration/` – opt-in connectivity tests for Postgres and Neo4j.

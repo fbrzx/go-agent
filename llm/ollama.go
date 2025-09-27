@@ -1,0 +1,98 @@
+package llm
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type ollamaClient struct {
+	host   string
+	model  string
+	client *http.Client
+}
+
+type ollamaChatRequest struct {
+	Model    string              `json:"model"`
+	Messages []ollamaChatMessage `json:"messages"`
+	Stream   bool                `json:"stream"`
+}
+
+type ollamaChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ollamaChatResponse struct {
+	Message ollamaChatMessage `json:"message"`
+	Done    bool              `json:"done"`
+	Error   string            `json:"error"`
+}
+
+func NewOllamaClient(opts Options) Client {
+	host := strings.TrimRight(opts.OllamaHost, "/")
+	if host == "" {
+		host = "http://localhost:11434"
+	}
+
+	return &ollamaClient{
+		host:  host,
+		model: opts.Model,
+		client: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+	}
+}
+
+func (c *ollamaClient) Generate(ctx context.Context, messages []Message) (string, error) {
+	payload := ollamaChatRequest{
+		Model:  c.model,
+		Stream: false,
+	}
+
+	payload.Messages = make([]ollamaChatMessage, len(messages))
+	for i, msg := range messages {
+		payload.Messages[i] = ollamaChatMessage{Role: msg.Role, Content: msg.Content}
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal ollama request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host+"/api/chat", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("create ollama request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("call ollama chat API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(resp.Body)
+		if len(data) > 0 {
+			return "", fmt.Errorf("ollama chat API error: %s", string(data))
+		}
+		return "", fmt.Errorf("ollama chat API returned status %s", resp.Status)
+	}
+
+	var parsed ollamaChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", fmt.Errorf("decode ollama response: %w", err)
+	}
+
+	if parsed.Error != "" {
+		return "", fmt.Errorf("ollama chat error: %s", parsed.Error)
+	}
+
+	return parsed.Message.Content, nil
+}
