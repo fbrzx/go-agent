@@ -23,3 +23,6 @@ vendor/
 documents/
 bin/
 .DS_Store
+
+# Frontend
+ui/node_modules/

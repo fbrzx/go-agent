@@ -153,7 +153,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/v1/chat/stream", s.handleChatStream)
 	mux.HandleFunc("/v1/clear", s.handleClear)
 	mux.HandleFunc("/", s.handleRoot)
-	mux.Handle("/static/", http.StripPrefix("/static/", s.staticHandler()))
+	mux.Handle("/assets/", s.staticHandler())
 	return mux
 }
 

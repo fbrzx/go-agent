@@ -7,14 +7,14 @@ import (
 	"net/http"
 )
 
-//go:embed ui
+//go:embed ui/dist
 var uiFS embed.FS
 
 var uiContent fs.FS
 
 func init() {
 	var err error
-	uiContent, err = fs.Sub(uiFS, "ui")
+	uiContent, err = fs.Sub(uiFS, "ui/dist")
 	if err != nil {
 		panic(fmt.Errorf("prepare ui filesystem: %w", err))
 	}

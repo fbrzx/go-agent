@@ -74,12 +74,12 @@ Behind the scenes the command:
 
 ## Development Tasks
 
-- `make train` – run the CLI with optional `TRAIN_ARGS` overrides (e.g., `--dir`).
+- `make ingest` – run the CLI with optional `TRAIN_ARGS` overrides (e.g., `--dir`).
 - `make chat` – query the agent; combine with `CHAT_ARGS="--question '...'"`.
 - `make clear` – wipe Postgres tables and Neo4j graph (`CONFIRM=1` to bypass the prompt).
 - `make test` – run unit tests (set `INCLUDE_INTEGRATION=1` to exercise live DB connectivity).
 - `make build` – refresh modules and build `bin/go-agent`.
-- `make serve` – launch the HTTP API that mirrors `train`, `chat`, and `clear` via OpenAPI.
+- `make serve` – launch the HTTP API that mirrors `ingest`, `chat`, and `clear` via OpenAPI.
 
 ## HTTP API
 
@@ -98,10 +98,25 @@ Responses include detailed error payloads and source metadata identical to the C
 
 ## Web UI
 
-Run `make serve` and open `http://localhost:8080/` to try a minimal streaming chat UI backed by the
-new SSE endpoint. Use the header upload control to send Markdown, PDF, or CSV files straight to the
-ingestion pipeline. Each follow-up question keeps the conversation context, and supporting sources are
-displayed inline for quick reference.
+Run `make serve` and open `http://localhost:8080/` to try the new React-powered dashboard. Multi-file
+uploads (including drag & drop anywhere in the chat panel) are available out of the box, and each
+successful ingest surfaces chunk counts inline. The chat composer streams responses token-by-token
+and preserves full conversation history across turns.
+
+### Frontend workflow
+
+The UI lives under `ui/` and is built with Vite + React + TypeScript. Development and build scripts:
+
+```sh
+cd ui
+npm install       # once
+npm run dev       # hot-reload development server
+npm run build     # emits assets into ../api/ui/dist for Go embedding
+```
+
+`npm run dev` starts Vite on port 5173; use it during frontend development and point the Go API at the
+same backend (`make serve`) for live requests. `npm run build` must run before shipping a release so the
+embedded assets stay in sync with the Go binary.
 
 ## Project Layout
 

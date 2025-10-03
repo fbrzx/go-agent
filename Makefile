@@ -35,7 +35,7 @@ build:
 
 ## train: Execute the ingestion command, sourcing variables from $(ENV_FILE) if present.
 ingest:
-	@echo "Running $(BINARY) train"
+	@echo "Running $(BINARY) document ingestion"
 	@( set -a; \
 	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
 	   set +a; \
