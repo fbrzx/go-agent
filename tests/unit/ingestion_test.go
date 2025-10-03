@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,6 +53,22 @@ func TestIngestDirectoryMissingEmbedder(t *testing.T) {
 	svc := ingestion.NewService((*pgxpool.Pool)(nil), nil, nil, nil, 128)
 	if err := svc.IngestDirectory(context.Background(), "./does-not-matter"); err == nil {
 		t.Fatal("expected error when embedder is nil")
+	}
+}
+
+func TestDetectFormat(t *testing.T) {
+	cases := map[string]ingestion.DocumentFormat{
+		"document.md":    ingestion.FormatMarkdown,
+		"notes.MARKDOWN": ingestion.FormatMarkdown,
+		"report.pdf":     ingestion.FormatPDF,
+		"data.csv":       ingestion.FormatCSV,
+		"unknown.txt":    ingestion.FormatUnknown,
+	}
+
+	for path, want := range cases {
+		if got := ingestion.DetectFormat(path); got != want {
+			t.Fatalf("detect format for %s: want %s, got %s", path, want, got)
+		}
 	}
 }
 
@@ -237,6 +254,88 @@ func TestIngestDocumentMatchesDiskIngestion(t *testing.T) {
 		if text != directEmbed.lastTexts[i] {
 			t.Fatalf("embed text %d mismatch: direct %q, disk %q", i, directEmbed.lastTexts[i], text)
 		}
+	}
+}
+
+func TestChunkPlainText(t *testing.T) {
+	content := "First paragraph line one.\nline two.\n\nSecond paragraph."
+	fragments, sections := ingestion.ChunkPlainText(content, "Plain", 30, 5)
+
+	if len(sections) != 1 {
+		t.Fatalf("expected one section, got %d", len(sections))
+	}
+
+	if sections[0].Title != "Plain" {
+		t.Fatalf("unexpected section title: %q", sections[0].Title)
+	}
+
+	if len(fragments) == 0 {
+		t.Fatal("expected at least one fragment for plain text")
+	}
+
+	if !strings.Contains(fragments[0].Text, "First paragraph") {
+		t.Fatalf("fragment does not contain expected text: %q", fragments[0].Text)
+	}
+}
+
+func TestIngestDocumentCSV(t *testing.T) {
+	t.Parallel()
+
+	csvContent := "title,category\nHello,World\nAnother,Row"
+	embed := &mockEmbedder{}
+	svc := ingestion.NewService(nil, nil, embed, nil, 1)
+
+	res, err := svc.IngestDocument(context.Background(), ingestion.DocumentPayload{
+		Path: "memory/data.csv",
+		Data: []byte(csvContent),
+	})
+	if err != nil {
+		t.Fatalf("ingest csv: %v", err)
+	}
+
+	if embed.calls != 1 {
+		t.Fatalf("expected embedder to be called once, got %d", embed.calls)
+	}
+
+	if res.Title != "title" {
+		t.Fatalf("unexpected title: want 'title', got %q", res.Title)
+	}
+
+	if len(res.Sections) != 1 || res.Sections[0].Title != "Rows" {
+		t.Fatalf("unexpected sections: %#v", res.Sections)
+	}
+
+	if len(res.Topics) != 2 {
+		t.Fatalf("expected two topics, got %d", len(res.Topics))
+	}
+
+	if res.Topics[0].Name != "title" || res.Topics[1].Name != "category" {
+		t.Fatalf("unexpected topics: %#v", res.Topics)
+	}
+
+	if len(res.Fragments) != 1 {
+		t.Fatalf("expected single fragment, got %d", len(res.Fragments))
+	}
+
+	fragment := res.Fragments[0].Text
+	if !strings.Contains(fragment, "Row 1") || !strings.Contains(fragment, "Row 2") {
+		t.Fatalf("fragment missing row labels: %q", fragment)
+	}
+	if !strings.Contains(fragment, "Hello") || !strings.Contains(fragment, "World") {
+		t.Fatalf("fragment missing csv data: %q", fragment)
+	}
+}
+
+func TestIngestDocumentUnsupportedFormat(t *testing.T) {
+	embed := &mockEmbedder{}
+	svc := ingestion.NewService(nil, nil, embed, nil, 1)
+
+	_, err := svc.IngestDocument(context.Background(), ingestion.DocumentPayload{
+		Path: "memory/data.txt",
+		Data: []byte("plain text"),
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported format")
 	}
 }
 

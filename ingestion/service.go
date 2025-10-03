@@ -35,9 +35,10 @@ type Service struct {
 	embedder  embeddings.Embedder
 	logger    *log.Logger
 	dimension int
+	parsers   map[DocumentFormat]DocumentParser
 }
 
-// DocumentPayload represents the data required to ingest a markdown document.
+// DocumentPayload represents the data required to ingest a document.
 type DocumentPayload struct {
 	// Root is the directory that should be treated as the ingestion root. It is
 	// used to compute the document's relative path. When empty, the document
@@ -45,8 +46,10 @@ type DocumentPayload struct {
 	Root string
 	// Path is the absolute or virtual path associated with the document.
 	Path string
-	// Data contains the raw markdown bytes of the document.
+	// Data contains the raw bytes of the document.
 	Data []byte
+	// Format optionally overrides the detected document format.
+	Format DocumentFormat
 }
 
 // DocumentResult contains the parsed metadata and embeddings generated during
@@ -91,12 +94,17 @@ func NewService(pool *pgxpool.Pool, driver neo4j.DriverWithContext, embedder emb
 		embedder:  embedder,
 		logger:    logger,
 		dimension: dimension,
+		parsers: map[DocumentFormat]DocumentParser{
+			FormatMarkdown: markdownParser{},
+			FormatPDF:      pdfParser{},
+			FormatCSV:      csvParser{},
+		},
 	}
 }
 
-// IngestDocument chunks the provided markdown payload, generates embeddings for
-// each chunk, and returns the in-memory representation that would be persisted
-// by the service. It does not perform any database or knowledge graph writes,
+// IngestDocument chunks the provided payload, generates embeddings for each
+// chunk, and returns the in-memory representation that would be persisted by
+// the service. It does not perform any database or knowledge graph writes,
 // making it suitable for unit testing and in-memory ingestion flows.
 func (s *Service) IngestDocument(ctx context.Context, payload DocumentPayload) (*DocumentResult, error) {
 	if s.embedder == nil {
@@ -106,7 +114,22 @@ func (s *Service) IngestDocument(ctx context.Context, payload DocumentPayload) (
 		return nil, fmt.Errorf("document path is required")
 	}
 
-	data := payload.Data
+	format := payload.Format
+	if format == FormatUnknown {
+		format = ""
+	}
+	if format == "" {
+		format = DetectFormat(payload.Path)
+	}
+	if format == FormatUnknown {
+		return nil, fmt.Errorf("unsupported document format: %s", payload.Path)
+	}
+
+	parser, ok := s.parsers[format]
+	if !ok {
+		return nil, fmt.Errorf("no parser registered for format %s", format)
+	}
+
 	relPath := payload.Path
 	if payload.Root != "" {
 		if candidate, err := filepath.Rel(payload.Root, payload.Path); err == nil {
@@ -120,18 +143,26 @@ func (s *Service) IngestDocument(ctx context.Context, payload DocumentPayload) (
 		folder = ""
 	}
 
-	content := string(data)
-	title := ExtractTitle(content, filepath.Base(payload.Path))
-	hash := sha256.Sum256(data)
-	hashHex := hex.EncodeToString(hash[:])
+	payload.Format = format
+	parsed, err := parser.Parse(ctx, payload)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", format, err)
+	}
 
-	fragments, sectionsMeta, topicsMeta := ChunkMarkdown(content, defaultChunkSize, defaultChunkOverlap)
-	if len(fragments) == 0 {
+	if parsed == nil || len(parsed.Fragments) == 0 {
 		return nil, errNoChunks
 	}
 
-	texts := make([]string, len(fragments))
-	for i, fragment := range fragments {
+	title := parsed.Title
+	if title == "" {
+		title = filepath.Base(payload.Path)
+	}
+
+	hash := sha256.Sum256(payload.Data)
+	hashHex := hex.EncodeToString(hash[:])
+
+	texts := make([]string, len(parsed.Fragments))
+	for i, fragment := range parsed.Fragments {
 		texts[i] = fragment.Text
 	}
 
@@ -140,8 +171,8 @@ func (s *Service) IngestDocument(ctx context.Context, payload DocumentPayload) (
 		return nil, fmt.Errorf("generate embeddings: %w", err)
 	}
 
-	if len(embeddings) != len(fragments) {
-		return nil, fmt.Errorf("embedding count mismatch: have %d chunks, %d embeddings", len(fragments), len(embeddings))
+	if len(embeddings) != len(parsed.Fragments) {
+		return nil, fmt.Errorf("embedding count mismatch: have %d chunks, %d embeddings", len(parsed.Fragments), len(embeddings))
 	}
 
 	return &DocumentResult{
@@ -149,9 +180,9 @@ func (s *Service) IngestDocument(ctx context.Context, payload DocumentPayload) (
 		Folder:     folder,
 		Title:      title,
 		Hash:       hashHex,
-		Fragments:  fragments,
-		Sections:   sectionsMeta,
-		Topics:     topicsMeta,
+		Fragments:  parsed.Fragments,
+		Sections:   parsed.Sections,
+		Topics:     parsed.Topics,
 		Embeddings: embeddings,
 	}, nil
 }
@@ -176,7 +207,7 @@ func (s *Service) IngestDirectory(ctx context.Context, dir string) error {
 		if d.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+		if format := DetectFormat(path); format != FormatUnknown {
 			entries = append(entries, path)
 		}
 		return nil
@@ -185,7 +216,7 @@ func (s *Service) IngestDirectory(ctx context.Context, dir string) error {
 	}
 
 	if len(entries) == 0 {
-		s.logger.Printf("no markdown files found in %s", dir)
+		s.logger.Printf("no supported documents found in %s", dir)
 		return nil
 	}
 
@@ -199,12 +230,18 @@ func (s *Service) IngestDirectory(ctx context.Context, dir string) error {
 }
 
 func (s *Service) ingestFile(ctx context.Context, root, path string) (err error) {
+	format := DetectFormat(path)
+	if format == FormatUnknown {
+		s.logger.Printf("skip unsupported format for %s", path)
+		return nil
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
 	}
 
-	result, err := s.IngestDocument(ctx, DocumentPayload{Root: root, Path: path, Data: data})
+	result, err := s.IngestDocument(ctx, DocumentPayload{Root: root, Path: path, Data: data, Format: format})
 	if err != nil {
 		if errors.Is(err, errNoChunks) {
 			s.logger.Printf("skip empty document %s", path)
@@ -301,7 +338,7 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 		return fmt.Errorf("sync knowledge graph: %w", err)
 	}
 
-	s.logger.Printf("ingested %s (%d chunks)", result.RelPath, len(chunkNodes))
+	s.logger.Printf("ingested %s [%s] (%d chunks)", result.RelPath, format, len(chunkNodes))
 	return nil
 }
 
@@ -415,7 +452,57 @@ func ChunkMarkdown(content string, target, overlap int) ([]ChunkFragment, []Sect
 		sections = append([]SectionMeta{top}, sections...)
 	}
 
+	fragments := chunkParagraphs(paragraphs, target, overlap)
+	return fragments, sections, topics
+}
+
+func ChunkPlainText(content, title string, target, overlap int) ([]ChunkFragment, []SectionMeta) {
+	clean := strings.ReplaceAll(content, "\r\n", "\n")
+	lines := strings.Split(clean, "\n")
+	section := SectionMeta{Title: title, Level: 1, Order: 0}
+
+	paragraphs := make([]paragraphWithSection, 0)
+	current := make([]string, 0)
+
+	addParagraph := func() {
+		if len(current) == 0 {
+			return
+		}
+		paragraph := strings.Join(current, "\n")
+		paragraphs = append(paragraphs, paragraphWithSection{Text: paragraph, Section: section})
+		current = current[:0]
+	}
+
+	for _, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			addParagraph()
+			continue
+		}
+		current = append(current, trimmed)
+	}
+
+	addParagraph()
+
+	fragments := chunkParagraphs(paragraphs, target, overlap)
+	sections := []SectionMeta{section}
+	return fragments, sections
+}
+
+type paragraphWithSection struct {
+	Text    string
+	Section SectionMeta
+}
+
+func chunkParagraphs(paragraphs []paragraphWithSection, target, overlap int) []ChunkFragment {
 	fragments := make([]ChunkFragment, 0)
+	if target <= 0 {
+		target = defaultChunkSize
+	}
+	if overlap < 0 {
+		overlap = 0
+	}
+
 	current := make([]paragraphWithSection, 0)
 	currentLen := 0
 
@@ -441,12 +528,7 @@ func ChunkMarkdown(content string, target, overlap int) ([]ChunkFragment, []Sect
 		fragments = append(fragments, buildChunkFragment(current))
 	}
 
-	return fragments, sections, topics
-}
-
-type paragraphWithSection struct {
-	Text    string
-	Section SectionMeta
+	return fragments
 }
 
 func headingLevel(line string) int {
