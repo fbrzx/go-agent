@@ -3,10 +3,15 @@ const formEl = document.getElementById("composer");
 const textareaEl = document.getElementById("question");
 const sendBtn = document.getElementById("send");
 const resetBtn = document.getElementById("reset");
+const uploadForm = document.getElementById("upload-form");
+const fileInput = document.getElementById("document");
+const ingestBtn = document.getElementById("ingest");
+const ingestStatusEl = document.getElementById("ingest-status");
 
 let conversationHistory = [];
 let streaming = false;
 let currentAssistant = null;
+let ingesting = false;
 
 formEl.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -51,6 +56,34 @@ resetBtn.addEventListener("click", () => {
   textareaEl.focus();
 });
 
+if (uploadForm && fileInput && ingestBtn) {
+  uploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (ingesting) {
+      return;
+    }
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) {
+      showUploadError(new Error("Select a .md, .pdf, or .csv file to ingest."));
+      return;
+    }
+    try {
+      await ingestDocument(file);
+    } catch (error) {
+      showUploadError(error);
+    }
+  });
+
+  fileInput.addEventListener("change", () => {
+    if (!fileInput.files || fileInput.files.length === 0) {
+      updateIngestStatus("");
+      return;
+    }
+    const file = fileInput.files[0];
+    updateIngestStatus(`${file.name}`);
+  });
+}
+
 async function streamChat(question) {
   const payload = {
     question,
@@ -88,6 +121,49 @@ async function streamChat(question) {
       }
       boundary = buffer.indexOf("\n\n");
     }
+  }
+}
+
+async function ingestDocument(file) {
+  const formData = new FormData();
+  formData.append("document", file);
+
+  setIngestState(true, `Uploading ${file.name}…`);
+
+  try {
+    const response = await fetch("/v1/ingest/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (parseError) {
+      if (!response.ok) {
+        throw new Error(`Upload failed (${response.status})`);
+      }
+      throw new Error("Unexpected response from server");
+    }
+
+    if (!response.ok) {
+      throw new Error(payload?.error || `Upload failed (${response.status})`);
+    }
+
+    const chunks = typeof payload?.document?.chunks === "number" ? payload.document.chunks : null;
+    const title = payload?.document?.title || file.name;
+    let message = payload?.message || `Ingested ${title}`;
+    if (chunks && chunks > 0) {
+      const label = chunks === 1 ? "chunk" : "chunks";
+      message = `${message} (${chunks} ${label})`;
+    }
+
+    setIngestState(false, message);
+    fileInput.value = "";
+    ingestBtn.blur();
+  } catch (error) {
+    setIngestState(false);
+    throw error;
   }
 }
 
@@ -199,6 +275,35 @@ function renderSources(container, sources) {
     link.textContent = `${index + 1}. ${source.title}`;
     sourcesEl.appendChild(link);
   });
+}
+
+function setIngestState(active, message) {
+  ingesting = active;
+  if (fileInput) {
+    fileInput.disabled = active;
+  }
+  if (ingestBtn) {
+    ingestBtn.disabled = active;
+    ingestBtn.textContent = active ? "Ingesting…" : "Ingest";
+  }
+  if (message !== undefined) {
+    updateIngestStatus(message, false);
+  }
+}
+
+function updateIngestStatus(message, isError = false) {
+  if (!ingestStatusEl) {
+    return;
+  }
+  ingestStatusEl.textContent = message;
+  ingestStatusEl.classList.toggle("upload__status--error", Boolean(isError && message));
+}
+
+function showUploadError(error) {
+  console.error(error);
+  setIngestState(false);
+  const message = error?.message || String(error);
+  updateIngestStatus(`Error: ${message}`, true);
 }
 
 function showError(error) {

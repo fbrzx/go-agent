@@ -3,11 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
@@ -19,7 +23,10 @@ import (
 	"github.com/fabfab/go-agent/llm"
 )
 
-const defaultChatLimit = 5
+const (
+	defaultChatLimit = 5
+	maxUploadSize    = 16 << 20 // 16 MiB
+)
 
 // Server exposes HTTP handlers for the core go-agent workflows.
 type Server struct {
@@ -34,6 +41,18 @@ type messageResponse struct {
 
 type errorResponse struct {
 	Error string `json:"error"`
+}
+
+type ingestUploadResponse struct {
+	Message  string           `json:"message"`
+	Document uploadedDocument `json:"document"`
+}
+
+type uploadedDocument struct {
+	Title  string `json:"title"`
+	Path   string `json:"path"`
+	Format string `json:"format"`
+	Chunks int    `json:"chunks"`
 }
 
 type ingestRequest struct {
@@ -129,6 +148,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/openapi.yaml", s.handleOpenAPI)
 	mux.HandleFunc("/v1/ingest", s.handleIngest)
+	mux.HandleFunc("/v1/ingest/upload", s.handleIngestUpload)
 	mux.HandleFunc("/v1/chat", s.handleChat)
 	mux.HandleFunc("/v1/chat/stream", s.handleChatStream)
 	mux.HandleFunc("/v1/clear", s.handleClear)
@@ -176,28 +196,14 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
+	svc, cleanup, err := s.buildIngestionService(ctx)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("postgres connection: %w", err))
+		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	defer pgPool.Close()
+	defer cleanup()
 
-	neo4jDriver, err := database.NewNeo4jDriver(ctx, s.cfg.Neo4jURI, s.cfg.Neo4jUser, s.cfg.Neo4jPass)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("neo4j connection: %w", err))
-		return
-	}
-	defer neo4jDriver.Close(ctx)
-
-	embedder, err := embeddings.NewEmbedder(s.cfg)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("embedder setup: %w", err))
-		return
-	}
-
-	svc := ingestion.NewService(pgPool, neo4jDriver, embedder, s.logger, s.cfg.Embeddings.Dimension)
-	s.logger.Printf("ingesting markdown from %s using %s/%s embeddings", dir, strings.ToUpper(s.cfg.Embeddings.Provider), s.cfg.Embeddings.Model)
+	s.logger.Printf("ingesting documents from %s using %s/%s embeddings", dir, strings.ToUpper(s.cfg.Embeddings.Provider), s.cfg.Embeddings.Model)
 
 	if err := svc.IngestDirectory(ctx, dir); err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("ingestion failed: %w", err))
@@ -205,6 +211,87 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, messageResponse{Message: "ingestion complete"})
+}
+
+func (s *Server) handleIngestUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.methodNotAllowed(w, http.MethodPost)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("parse multipart form: %w", err))
+		return
+	}
+
+	file, header, err := r.FormFile("document")
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("document field is required: %w", err))
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("read upload: %w", err))
+		return
+	}
+	if len(data) == 0 {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("uploaded file is empty"))
+		return
+	}
+
+	fileName := sanitizeUploadName(header.Filename)
+	format := ingestion.DetectFormat(fileName)
+	if format == ingestion.FormatUnknown {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported document format: %s", fileName))
+		return
+	}
+
+	timestamp := time.Now().UTC().Format("20060102-150405")
+	relativePath := filepath.ToSlash(filepath.Join("uploads", fmt.Sprintf("%s-%s", timestamp, fileName)))
+	payload := ingestion.DocumentPayload{Path: relativePath, Data: data, Format: format}
+
+	ctx := r.Context()
+
+	svc, cleanup, err := s.buildIngestionService(ctx)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer cleanup()
+
+	result, err := svc.IngestDocument(ctx, payload)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ingestion.ErrNoChunks) {
+			status = http.StatusBadRequest
+		}
+		s.writeError(w, status, fmt.Errorf("ingest document: %w", err))
+		return
+	}
+
+	chunks, err := svc.PersistDocument(ctx, result, format)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("persist document: %w", err))
+		return
+	}
+
+	message := fmt.Sprintf("ingested %s", result.Title)
+	if chunks == 0 {
+		message = fmt.Sprintf("no updates required for %s", result.Title)
+	}
+
+	s.writeJSON(w, http.StatusOK, ingestUploadResponse{
+		Message: message,
+		Document: uploadedDocument{
+			Title:  result.Title,
+			Path:   result.RelPath,
+			Format: string(format),
+			Chunks: chunks,
+		},
+	})
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -416,6 +503,34 @@ func (s *Server) resolveLimit(limit int) int {
 	return limit
 }
 
+func (s *Server) buildIngestionService(ctx context.Context) (*ingestion.Service, func(), error) {
+	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("postgres connection: %w", err)
+	}
+
+	neo4jDriver, err := database.NewNeo4jDriver(ctx, s.cfg.Neo4jURI, s.cfg.Neo4jUser, s.cfg.Neo4jPass)
+	if err != nil {
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("neo4j connection: %w", err)
+	}
+
+	embedder, err := embeddings.NewEmbedder(s.cfg)
+	if err != nil {
+		neo4jDriver.Close(ctx)
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("embedder setup: %w", err)
+	}
+
+	svc := ingestion.NewService(pgPool, neo4jDriver, embedder, s.logger, s.cfg.Embeddings.Dimension)
+	cleanup := func() {
+		neo4jDriver.Close(ctx)
+		pgPool.Close()
+	}
+
+	return svc, cleanup, nil
+}
+
 func (s *Server) buildChatService(ctx context.Context) (*chat.Service, func(), error) {
 	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
 	if err != nil {
@@ -511,6 +626,28 @@ func buildSources(sources []chat.Source) []chatSource {
 		}
 	}
 	return converted
+}
+
+func sanitizeUploadName(name string) string {
+	base := filepath.Base(name)
+	base = strings.TrimSpace(base)
+	if base == "" || base == "." {
+		base = "document"
+	}
+	sanitized := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return r
+		}
+		switch r {
+		case '.', '-', '_':
+			return r
+		}
+		return '_'
+	}, base)
+	if sanitized == "" {
+		return "document"
+	}
+	return sanitized
 }
 
 func transformInsight(insight chat.DocumentInsight) chatDocumentInsight {

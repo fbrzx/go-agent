@@ -99,7 +99,8 @@ Responses include detailed error payloads and source metadata identical to the C
 ## Web UI
 
 Run `make serve` and open `http://localhost:8080/` to try a minimal streaming chat UI backed by the
-new SSE endpoint. Each follow-up question keeps the conversation context, and supporting sources are
+new SSE endpoint. Use the header upload control to send Markdown, PDF, or CSV files straight to the
+ingestion pipeline. Each follow-up question keeps the conversation context, and supporting sources are
 displayed inline for quick reference.
 
 ## Project Layout

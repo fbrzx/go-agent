@@ -66,7 +66,8 @@ type DocumentResult struct {
 	Embeddings [][]float32
 }
 
-var errNoChunks = errors.New("document produced no chunks")
+// ErrNoChunks signals that parsing produced no chunkable content.
+var ErrNoChunks = errors.New("document produced no chunks")
 
 type ChunkFragment struct {
 	Text    string
@@ -150,7 +151,7 @@ func (s *Service) IngestDocument(ctx context.Context, payload DocumentPayload) (
 	}
 
 	if parsed == nil || len(parsed.Fragments) == 0 {
-		return nil, errNoChunks
+		return nil, ErrNoChunks
 	}
 
 	title := parsed.Title
@@ -243,17 +244,27 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 
 	result, err := s.IngestDocument(ctx, DocumentPayload{Root: root, Path: path, Data: data, Format: format})
 	if err != nil {
-		if errors.Is(err, errNoChunks) {
+		if errors.Is(err, ErrNoChunks) {
 			s.logger.Printf("skip empty document %s", path)
 			return nil
 		}
 		return err
 	}
 
+	_, err = s.PersistDocument(ctx, result, format)
+	return err
+}
+
+func (s *Service) PersistDocument(ctx context.Context, result *DocumentResult, format DocumentFormat) (count int, err error) {
+	if result == nil {
+		return 0, fmt.Errorf("document result is nil")
+	}
+
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return 0, fmt.Errorf("begin tx: %w", err)
 	}
+
 	defer func() {
 		if err != nil {
 			if rbErr := tx.Rollback(ctx); rbErr != nil {
@@ -264,7 +275,7 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 
 	docID, changed, err := upsertDocument(ctx, tx, result.RelPath, result.Title, result.Hash)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	sectionIDs := map[int]string{}
@@ -292,7 +303,7 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 
 	if changed {
 		if _, err = tx.Exec(ctx, "DELETE FROM rag_chunks WHERE document_id = $1", docID); err != nil {
-			return fmt.Errorf("clear existing chunks: %w", err)
+			return 0, fmt.Errorf("clear existing chunks: %w", err)
 		}
 
 		for idx, fragment := range result.Fragments {
@@ -309,18 +320,18 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
                                 INSERT INTO rag_chunks (id, document_id, chunk_index, section_order, section_level, section_title, content, embedding, created_at, updated_at)
                                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
                         `, chunkID, docID, idx, fragment.Section.Order, fragment.Section.Level, fragment.Section.Title, fragment.Text, vec); err != nil {
-				return fmt.Errorf("insert chunk %d: %w", idx, err)
+				return 0, fmt.Errorf("insert chunk %d: %w", idx, err)
 			}
 		}
 	}
 
 	if commitErr := tx.Commit(ctx); commitErr != nil {
-		return fmt.Errorf("commit transaction: %w", commitErr)
+		return 0, fmt.Errorf("commit transaction: %w", commitErr)
 	}
 
 	if len(chunkNodes) == 0 {
 		s.logger.Printf("no updates required for %s", result.RelPath)
-		return nil
+		return 0, nil
 	}
 
 	doc := knowledge.Document{
@@ -335,11 +346,11 @@ func (s *Service) ingestFile(ctx context.Context, root, path string) (err error)
 	}
 
 	if err := knowledge.SyncDocument(ctx, s.driver, doc); err != nil {
-		return fmt.Errorf("sync knowledge graph: %w", err)
+		return 0, fmt.Errorf("sync knowledge graph: %w", err)
 	}
 
 	s.logger.Printf("ingested %s [%s] (%d chunks)", result.RelPath, format, len(chunkNodes))
-	return nil
+	return len(chunkNodes), nil
 }
 
 func upsertDocument(ctx context.Context, tx pgx.Tx, path, title, sha string) (uuid.UUID, bool, error) {

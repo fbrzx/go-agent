@@ -9,8 +9,23 @@
   <body>
     <main class="chat">
       <header class="chat__header">
-        <h1>go-agent Chat</h1>
-        <button id="reset" type="button" title="Start a new conversation">New Session</button>
+        <div class="chat__heading">
+          <h1>go-agent Chat</h1>
+          <p id="ingest-status" class="upload__status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="chat__actions">
+          <form id="upload-form" class="upload" enctype="multipart/form-data" autocomplete="off">
+            <label for="document" class="visually-hidden">Choose a document to ingest</label>
+            <input
+              id="document"
+              name="document"
+              type="file"
+              accept=".md,.markdown,.pdf,.csv"
+            />
+            <button id="ingest" type="submit">Ingest</button>
+          </form>
+          <button id="reset" type="button" title="Start a new conversation">New Session</button>
+        </div>
       </header>
       <section id="messages" class="chat__messages" aria-live="polite"></section>
       <form id="composer" class="chat__composer" autocomplete="off">

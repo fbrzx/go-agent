@@ -44,7 +44,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /v1/ingest:
     post:
-      summary: Ingest markdown documents from disk.
+      summary: Ingest supported documents (Markdown, PDF, CSV) from disk.
       operationId: ingestDocuments
       requestBody:
         required: false
@@ -61,6 +61,43 @@ paths:
                 $ref: '#/components/schemas/MessageResponse'
         '400':
           description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Ingestion failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/ingest/upload:
+    post:
+      summary: Upload and ingest a single supported document immediately.
+      operationId: ingestUpload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                document:
+                  type: string
+                  format: binary
+                  description: Document to ingest (.md, .markdown, .pdf, .csv).
+              required:
+                - document
+      responses:
+        '200':
+          description: Document ingested successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestUploadResponse'
+        '400':
+          description: Invalid upload payload.
           content:
             application/json:
               schema:
@@ -195,6 +232,38 @@ components:
         dir:
           type: string
           description: Optional override for the documents directory. Defaults to DATA_DIR.
+    IngestUploadResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        message:
+          type: string
+        document:
+          $ref: '#/components/schemas/UploadedDocument'
+      required:
+        - message
+        - document
+    UploadedDocument:
+      type: object
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+        path:
+          type: string
+        format:
+          type: string
+          enum: [markdown, pdf, csv]
+          description: Detected document format.
+        chunks:
+          type: integer
+          minimum: 0
+          description: Number of chunks written to storage.
+      required:
+        - title
+        - path
+        - format
+        - chunks
     ChatRequest:
       type: object
       additionalProperties: false

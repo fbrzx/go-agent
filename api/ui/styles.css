@@ -29,14 +29,29 @@ body {
 
 .chat__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .chat__header h1 {
   font-size: 1.4rem;
   margin: 0;
+}
+
+.chat__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.chat__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .chat__header button {
@@ -45,6 +60,29 @@ body {
   border-radius: 0.5rem;
   background: var(--panel);
   cursor: pointer;
+}
+
+
+.upload {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.upload input[type="file"] {
+  font: inherit;
+  max-width: 18rem;
+}
+
+.upload__status {
+  font-size: 0.85rem;
+  color: var(--muted);
+  min-height: 1.2rem;
+}
+
+.upload__status--error {
+  color: #b91c1c;
 }
 
 .chat__messages {
