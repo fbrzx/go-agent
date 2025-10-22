@@ -20,7 +20,7 @@ linters:
     - revive        # Fast, configurable, extensible linter
     - gosec         # Security checker
     - bodyclose     # Check HTTP body closes
-    - exportloopref # Check loop variable captures
+    - copyloopvar   # Check loop variable captures (replaces exportloopref)
     - noctx         # Detect http.Request without context
     - sqlclosecheck # Check sql.Rows and sql.Stmt closes
 
@@ -108,7 +108,8 @@ issues:
   new: false
 
 output:
-  format: colored-line-number
+  formats:
+    - format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
   uniq-by-line: true
