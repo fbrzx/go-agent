@@ -61,19 +61,24 @@ function formatBytes(bytes: number) {
 
 function isSupportedFile(name: string) {
   const lower = name.toLowerCase();
-  return lower.endsWith('.md') || lower.endsWith('.markdown') || lower.endsWith('.pdf') || lower.endsWith('.csv');
+  return (
+    lower.endsWith('.md') ||
+    lower.endsWith('.markdown') ||
+    lower.endsWith('.pdf') ||
+    lower.endsWith('.csv')
+  );
 }
 
 const dropZoneText = {
   idle: 'Add documents',
-  dragging: 'Release to add files to the processing queue'
+  dragging: 'Release to add files to the processing queue',
 };
 
 const statusLabels: Record<UploadStatus, string> = {
   pending: 'Waiting to process',
   uploading: 'Uploading…',
   success: 'Processed',
-  error: 'Failed'
+  error: 'Failed',
 };
 
 const toastDuration = 4200;
@@ -105,23 +110,26 @@ const App: React.FC = () => {
 
   const pushToast = useCallback((message: string, tone: ToastTone = 'default') => {
     const id = createId();
-    setToasts((prev) => [...prev, { id, message, tone }]);
+    setToasts(prev => [...prev, { id, message, tone }]);
     window.setTimeout(() => {
-      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      setToasts(prev => prev.filter(toast => toast.id !== id));
     }, toastDuration);
   }, []);
 
   const appendMessage = useCallback(
     (message: ChatMessage) => {
-      setMessages((prev) => [...prev, message]);
+      setMessages(prev => [...prev, message]);
       requestAnimationFrame(scrollToBottom);
     },
     [scrollToBottom]
   );
 
-  const updateMessage = useCallback((id: string, updater: (message: ChatMessage) => ChatMessage) => {
-    setMessages((prev) => prev.map((message) => (message.id === id ? updater(message) : message)));
-  }, []);
+  const updateMessage = useCallback(
+    (id: string, updater: (message: ChatMessage) => ChatMessage) => {
+      setMessages(prev => prev.map(message => (message.id === id ? updater(message) : message)));
+    },
+    []
+  );
 
   const resetConversation = useCallback(() => {
     setMessages([]);
@@ -133,15 +141,15 @@ const App: React.FC = () => {
   const handleChatError = useCallback(
     (assistantId: string, error: unknown) => {
       console.error(error);
-      updateMessage(assistantId, (message) => ({
+      updateMessage(assistantId, message => ({
         ...message,
         error: true,
         content:
           error instanceof Error
             ? `Error: ${error.message}`
             : typeof error === 'string'
-            ? `Error: ${error}`
-            : 'Error: Failed to fetch response'
+              ? `Error: ${error}`
+              : 'Error: Failed to fetch response',
       }));
       pushToast('Something went wrong while streaming the response.', 'error');
     },
@@ -152,13 +160,13 @@ const App: React.FC = () => {
     async (prompt: string, assistantId: string) => {
       const payload = {
         question: prompt,
-        history
+        history,
       };
 
       const response = await fetch('/v1/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok || !response.body) {
@@ -200,9 +208,9 @@ const App: React.FC = () => {
                 if (eventType === 'chunk') {
                   const chunkContent = typeof parsed.content === 'string' ? parsed.content : '';
                   if (chunkContent) {
-                    updateMessage(assistantId, (message) => ({
+                    updateMessage(assistantId, message => ({
                       ...message,
-                      content: message.content + chunkContent
+                      content: message.content + chunkContent,
                     }));
                   }
                 } else if (eventType === 'final') {
@@ -210,10 +218,10 @@ const App: React.FC = () => {
                   const sources = Array.isArray(parsed.sources)
                     ? (parsed.sources as Source[]).filter(Boolean)
                     : undefined;
-                  updateMessage(assistantId, (message) => ({
+                  updateMessage(assistantId, message => ({
                     ...message,
                     content: answer || message.content,
-                    sources
+                    sources,
                   }));
                   if (Array.isArray(parsed.history)) {
                     setHistory(parsed.history as HistoryTurn[]);
@@ -254,12 +262,12 @@ const App: React.FC = () => {
       const userMessage: ChatMessage = {
         id: createId(),
         role: 'user',
-        content: trimmed
+        content: trimmed,
       };
       const assistantMessage: ChatMessage = {
         id: createId(),
         role: 'assistant',
-        content: ''
+        content: '',
       };
 
       appendMessage(userMessage);
@@ -294,17 +302,20 @@ const App: React.FC = () => {
       if (!files.length) {
         return;
       }
-      setUploads((previous) => {
-        const existingKeys = new Set(previous.map((entry) => `${entry.name}:${entry.size}`));
+      setUploads(previous => {
+        const existingKeys = new Set(previous.map(entry => `${entry.name}:${entry.size}`));
         const nextEntries: UploadEntry[] = [];
 
-        files.forEach((file) => {
+        files.forEach(file => {
           if (!isSupportedFile(file.name)) {
             pushToast(`${file.name} is not a supported format.`, 'error');
             return;
           }
           const key = `${file.name}:${file.size}`;
-          if (existingKeys.has(key) || nextEntries.some((entry) => `${entry.name}:${entry.size}` === key)) {
+          if (
+            existingKeys.has(key) ||
+            nextEntries.some(entry => `${entry.name}:${entry.size}` === key)
+          ) {
             pushToast(`${file.name} is already queued.`, 'default');
             return;
           }
@@ -314,14 +325,17 @@ const App: React.FC = () => {
             name: file.name,
             size: file.size,
             status: 'pending',
-            file
+            file,
           });
         });
 
         if (nextEntries.length === 0) {
           return previous;
         }
-        pushToast(`${nextEntries.length} file${nextEntries.length > 1 ? 's' : ''} queued for processing.`, 'success');
+        pushToast(
+          `${nextEntries.length} file${nextEntries.length > 1 ? 's' : ''} queued for processing.`,
+          'success'
+        );
         return [...previous, ...nextEntries];
       });
 
@@ -336,7 +350,7 @@ const App: React.FC = () => {
     if (activeUploadId) {
       return;
     }
-    const pending = uploads.find((entry) => entry.status === 'pending');
+    const pending = uploads.find(entry => entry.status === 'pending');
     if (!pending) {
       return;
     }
@@ -347,7 +361,9 @@ const App: React.FC = () => {
 
     const ingestFile = async () => {
       setActiveUploadId(id);
-      setUploads((previous) => previous.map((entry) => (entry.id === id ? { ...entry, status: 'uploading' } : entry)));
+      setUploads(previous =>
+        previous.map(entry => (entry.id === id ? { ...entry, status: 'uploading' } : entry))
+      );
 
       try {
         const formData = new FormData();
@@ -356,7 +372,7 @@ const App: React.FC = () => {
         const response = await fetch('/v1/ingest/upload', {
           method: 'POST',
           body: formData,
-          signal: controller.signal
+          signal: controller.signal,
         });
 
         const payload = await response.json().catch(() => ({}));
@@ -366,20 +382,21 @@ const App: React.FC = () => {
           throw new Error(message);
         }
 
-        const chunks: number | undefined = typeof payload?.document?.chunks === 'number' ? payload.document.chunks : undefined;
+        const chunks: number | undefined =
+          typeof payload?.document?.chunks === 'number' ? payload.document.chunks : undefined;
         const successMessage =
           typeof payload?.message === 'string' && payload.message.length > 0
             ? payload.message
             : `Processed ${name}`;
 
-        setUploads((previous) =>
-          previous.map((entry) =>
+        setUploads(previous =>
+          previous.map(entry =>
             entry.id === id
               ? {
                   ...entry,
                   status: 'success',
                   message: successMessage,
-                  chunks
+                  chunks,
                 }
               : entry
           )
@@ -388,13 +405,13 @@ const App: React.FC = () => {
       } catch (error) {
         console.error(error);
         const message = error instanceof Error ? error.message : 'Upload failed';
-        setUploads((previous) =>
-          previous.map((entry) =>
+        setUploads(previous =>
+          previous.map(entry =>
             entry.id === id
               ? {
                   ...entry,
                   status: 'error',
-                  message
+                  message,
                 }
               : entry
           )
@@ -415,8 +432,10 @@ const App: React.FC = () => {
     if (!uploads.length) {
       return 'Uploads appear here as they are processed.';
     }
-    const completed = uploads.filter((entry) => entry.status === 'success').length;
-    const pending = uploads.filter((entry) => entry.status === 'pending' || entry.status === 'uploading').length;
+    const completed = uploads.filter(entry => entry.status === 'success').length;
+    const pending = uploads.filter(
+      entry => entry.status === 'pending' || entry.status === 'uploading'
+    ).length;
     if (pending === 0) {
       return `All uploads processed (${completed} complete).`;
     }
@@ -471,11 +490,17 @@ const App: React.FC = () => {
           <div>
             <h1 className="app-title">Memory</h1>
             <p className="app-subtitle">
-              Chat with your Markdown, PDF, and CSV sources. Upload new knowledge directly into your retrieval index.
+              Chat with your Markdown, PDF, and CSV sources. Upload new knowledge directly into your
+              retrieval index.
             </p>
           </div>
           <div className="session-actions">
-            <button className="secondary-button" type="button" onClick={resetConversation} disabled={streaming || messages.length === 0}>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={resetConversation}
+              disabled={streaming || messages.length === 0}
+            >
               Start new session
             </button>
           </div>
@@ -497,8 +522,11 @@ const App: React.FC = () => {
                   <span>Drag files anywhere in this panel or use the uploader on the right.</span>
                 </div>
               ) : (
-                messages.map((message) => (
-                  <article key={message.id} className={`message ${message.role}${message.error ? ' error' : ''}`}>
+                messages.map(message => (
+                  <article
+                    key={message.id}
+                    className={`message ${message.role}${message.error ? ' error' : ''}`}
+                  >
                     <p>{message.content || (message.role === 'assistant' ? 'Thinking…' : '')}</p>
                     <div className="message-footer">
                       <span>{message.role === 'user' ? 'You' : 'Assistant'}</span>
@@ -519,7 +547,7 @@ const App: React.FC = () => {
                 value={question}
                 disabled={streaming}
                 placeholder="Ask the assistant anything about your documents…"
-                onChange={(event) => setQuestion(event.target.value)}
+                onChange={event => setQuestion(event.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={3}
               />
@@ -534,7 +562,7 @@ const App: React.FC = () => {
               type="button"
               className={`sidebar-tab${sidebarOpen ? ' active' : ''}`}
               aria-expanded={sidebarOpen}
-              onClick={() => setSidebarOpen((open) => !open)}
+              onClick={() => setSidebarOpen(open => !open)}
             >
               <span aria-hidden>{sidebarOpen ? '⟨' : '⟩'}</span>
               <span className="sidebar-tab__label visually-hidden">Add</span>
@@ -543,12 +571,14 @@ const App: React.FC = () => {
             <div className="sidebar-content" aria-hidden={!sidebarOpen}>
               <section className="upload-card">
                 <h2 className="upload-title">Add knowledge</h2>
-                <p className="app-subtitle">Queue one or more files to add knowledge to my brain.</p>
+                <p className="app-subtitle">
+                  Queue one or more files to add knowledge to my brain.
+                </p>
 
                 <div
                   className={`upload-dropzone${isDragging ? ' dragging' : ''}`}
                   onClick={() => fileInputRef.current?.click()}
-                  onKeyDown={(event) => {
+                  onKeyDown={event => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
                       fileInputRef.current?.click();
@@ -579,7 +609,7 @@ const App: React.FC = () => {
                       name="documents"
                       multiple
                       accept=".md,.markdown,.pdf,.csv"
-                      onChange={(event) => {
+                      onChange={event => {
                         if (event.target.files) {
                           handleFiles(event.target.files);
                         }
@@ -591,7 +621,7 @@ const App: React.FC = () => {
                 <p className="app-subtitle">{uploadSummary}</p>
 
                 <div className="upload-list" role="list">
-                  {uploads.map((entry) => (
+                  {uploads.map(entry => (
                     <article key={entry.id} className="upload-item" role="listitem">
                       <header>
                         <span>{entry.name}</span>
@@ -615,7 +645,7 @@ const App: React.FC = () => {
         </div>
 
         <div className="toast-container" aria-live="polite" aria-atomic="true">
-          {toasts.map((toast) => (
+          {toasts.map(toast => (
             <div key={toast.id} className={`toast${toast.tone === 'error' ? ' error' : ''}`}>
               {toast.message}
             </div>

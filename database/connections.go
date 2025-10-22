@@ -17,10 +17,10 @@ func NewPostgresPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	}
 
 	// Optimize connection pool settings
-	config.MaxConns = 25                     // Maximum number of connections in the pool
-	config.MinConns = 5                      // Minimum number of connections to maintain
-	config.MaxConnLifetime = 1 * time.Hour   // Maximum lifetime of a connection
-	config.MaxConnIdleTime = 30 * time.Minute // Maximum time a connection can be idle
+	config.MaxConns = 25                       // Maximum number of connections in the pool
+	config.MinConns = 5                        // Minimum number of connections to maintain
+	config.MaxConnLifetime = 1 * time.Hour     // Maximum lifetime of a connection
+	config.MaxConnIdleTime = 30 * time.Minute  // Maximum time a connection can be idle
 	config.HealthCheckPeriod = 1 * time.Minute // How often to check connection health
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)

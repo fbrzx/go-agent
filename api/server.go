@@ -37,7 +37,7 @@ type Server struct {
 	pgPool      *pgxpool.Pool
 	neo4jDriver neo4j.DriverWithContext
 	embedder    embeddings.Embedder
-	llmClient   llm.StreamClient
+	llmClient   llm.Client
 }
 
 // CleanupFunc is a function that cleans up server resources
