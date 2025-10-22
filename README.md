@@ -205,3 +205,48 @@ The Docker setup includes several optimizations:
 - **Persistent volumes**: Data survives container restarts
 
 For detailed Docker documentation including troubleshooting, monitoring, and production best practices, see [DOCKER.md](DOCKER.md).
+
+## Continuous Integration
+
+The project includes a comprehensive CI/CD pipeline with GitHub Actions:
+
+- **Automated Testing**: Unit and integration tests on every PR
+- **Code Quality**: Linting for Go and TypeScript
+- **Security Scanning**: Vulnerability detection with Trivy and gosec
+- **Docker Validation**: Automated build and compose stack testing
+- **Code Coverage**: Automatic coverage reporting
+
+### Local CI Checks
+
+Run the full CI pipeline locally before pushing:
+
+```bash
+# Run complete CI suite
+./scripts/ci-local.sh
+
+# Or run individual checks
+./scripts/lint.sh           # Linting only
+./scripts/test.sh           # Unit tests
+INCLUDE_INTEGRATION=1 \
+  ./scripts/test.sh         # With integration tests
+```
+
+### Helper Scripts
+
+```bash
+# Manage development infrastructure
+./scripts/infra.sh up       # Start PostgreSQL, Neo4j, Ollama
+./scripts/infra.sh status   # Check service health
+./scripts/infra.sh down     # Stop services
+./scripts/infra.sh clean    # Remove all data
+
+# Run tests
+./scripts/test.sh           # Unit tests
+INCLUDE_INTEGRATION=1 \
+  ./scripts/test.sh         # All tests
+
+# Linting
+./scripts/lint.sh           # Check code quality
+```
+
+For comprehensive CI/CD documentation, see [CI.md](CI.md).
