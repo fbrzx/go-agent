@@ -2,6 +2,8 @@ module github.com/fabfab/go-agent
 
 go 1.23
 
+toolchain go1.23.0
+
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
