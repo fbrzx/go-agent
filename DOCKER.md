@@ -123,8 +123,8 @@ The Docker Compose setup includes 5 services:
 │postgres│ │  neo4j  │ │ ollama  │ │ollama-setup  │
 │+ vector│ │  graph  │ │  LLM    │ │ (init only)  │
 └────────┘ └─────────┘ └─────────┘ └──────────────┘
-Port 5432   Ports 7474  Port 11434
-            & 7687
+Port 5432   Ports 7474  Port 11435  (maps ~/.ollama)
+            & 7687      (→11434)
 ```
 
 ### Service Details
@@ -163,6 +163,29 @@ EMBEDDING_DIMENSION=768
 # LLM_MODEL=gpt-4-turbo-preview
 # EMBEDDING_MODEL=text-embedding-3-small
 ```
+
+### Port Mappings
+
+The following ports are exposed on the host:
+
+- **8080** → go-agent (HTTP API + Web UI)
+- **5432** → PostgreSQL with pgvector
+- **7474** → Neo4j Browser (HTTP)
+- **7687** → Neo4j Bolt protocol
+- **11435** → Ollama API (mapped to avoid conflicts with host Ollama on 11434)
+
+### Volume Mappings
+
+**Important:** Ollama models are stored in `~/.ollama` on your host machine. This means:
+- Models are reused if you already have Ollama running locally
+- Models persist across container restarts
+- You can share models between containerized and host Ollama instances
+- First-time setup will be faster if models are already downloaded
+
+Other persistent data uses Docker named volumes:
+- `go-agent-postgres-data` → PostgreSQL database
+- `go-agent-neo4j-data` → Neo4j graph database
+- `go-agent-app-data` → Application data
 
 ### Switching to OpenAI
 
@@ -265,9 +288,8 @@ docker compose exec postgres pg_dump -U postgres go-agent > backup.sql
 # Backup Neo4j
 docker compose exec neo4j neo4j-admin database dump neo4j --to-path=/backups
 
-# Backup Ollama models
-docker run --rm -v go-agent-ollama-data:/data -v $(pwd):/backup \
-  alpine tar czf /backup/ollama-backup.tar.gz /data
+# Backup Ollama models (stored in ~/.ollama on host)
+tar czf ollama-backup.tar.gz -C ~/ .ollama
 ```
 
 ## Service Management
@@ -485,8 +507,8 @@ docker compose exec postgres pg_isready
 # Neo4j
 curl http://localhost:7474
 
-# Ollama
-curl http://localhost:11434/api/tags
+# Ollama (mapped to port 11435 to avoid conflicts with host)
+curl http://localhost:11435/api/tags
 ```
 
 ### Resource Monitoring

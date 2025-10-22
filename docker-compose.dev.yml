@@ -62,9 +62,9 @@ services:
     image: ollama/ollama:latest
     container_name: go-agent-ollama-dev
     ports:
-      - "11434:11434"
+      - "11435:11434"  # Map to 11435 to avoid host conflicts
     volumes:
-      - ollama_dev_data:/root/.ollama
+      - ${HOME}/.ollama:/root/.ollama  # Reuse local models
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
       interval: 30s
@@ -90,5 +90,3 @@ volumes:
     name: go-agent-neo4j-dev-import
   neo4j_dev_plugins:
     name: go-agent-neo4j-dev-plugins
-  ollama_dev_data:
-    name: go-agent-ollama-dev-data
