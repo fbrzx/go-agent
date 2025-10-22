@@ -1,3 +1,4 @@
+// Package ingestion handles document parsing, chunking, and persistence to vector and graph databases.
 package ingestion
 
 import (

@@ -1,3 +1,4 @@
+// Package api provides HTTP handlers and REST API endpoints for the go-agent RAG system.
 package api
 
 import (
@@ -565,7 +566,7 @@ func (s *Server) resolveLimit(limit int) int {
 	return limit
 }
 
-func (s *Server) buildIngestionService(ctx context.Context) (*ingestion.Service, func(), error) {
+func (s *Server) buildIngestionService(_ context.Context) (*ingestion.Service, func(), error) {
 	// Reuse existing connections from the server
 	svc := ingestion.NewService(s.pgPool, s.neo4jDriver, s.embedder, s.logger, s.cfg.Embeddings.Dimension)
 
@@ -575,7 +576,7 @@ func (s *Server) buildIngestionService(ctx context.Context) (*ingestion.Service,
 	return svc, cleanup, nil
 }
 
-func (s *Server) buildChatService(ctx context.Context) (*chat.Service, func(), error) {
+func (s *Server) buildChatService(_ context.Context) (*chat.Service, func(), error) {
 	// Reuse existing connections from the server
 	vectorStore := chat.NewPostgresVectorStore(s.pgPool)
 	graphStore := chat.NewNeo4jGraphStore(s.neo4jDriver)

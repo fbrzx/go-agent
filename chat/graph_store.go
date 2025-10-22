@@ -1,3 +1,4 @@
+// Package chat implements the retrieval-augmented generation (RAG) chat service.
 package chat
 
 import (

@@ -1,3 +1,4 @@
+// Package database provides connection management and pooling for PostgreSQL and Neo4j databases.
 package database
 
 import (
