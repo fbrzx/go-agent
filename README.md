@@ -2,7 +2,29 @@
 
 Agentic RAG scaffold for experimenting with Markdown, PDF, and CSV knowledge bases. The project ingests `.md`, `.pdf`, and `.csv` files, chunks and embeds their contents into Postgres (with pgvector), and mirrors the knowledge structure inside Neo4j. Embedding generation is pluggable so you can point the pipeline at local Ollama models or hosted OpenAI APIs.
 
-## Prerequisites
+## Quick Start with Docker (Recommended)
+
+The easiest way to get started is using Docker Compose, which sets up all dependencies automatically:
+
+```bash
+# 1. Copy environment configuration
+cp .env.docker .env
+
+# 2. Start all services (PostgreSQL, Neo4j, Ollama, and the app)
+docker compose up -d
+
+# 3. Wait for initialization (5-10 minutes for first run)
+docker compose logs -f ollama-setup
+
+# 4. Access the application
+# Web UI: http://localhost:8080
+# API Docs: http://localhost:8080/openapi.yaml
+# Neo4j Browser: http://localhost:7474
+```
+
+See [DOCKER.md](DOCKER.md) for comprehensive Docker deployment documentation.
+
+## Prerequisites (Manual Setup)
 
 - Go 1.20+
 - PostgreSQL 15+ with the `vector` extension (pgvector)
@@ -130,3 +152,56 @@ embedded assets stay in sync with the Go binary.
 - `tests/integration/` – opt-in connectivity tests for Postgres and Neo4j.
 
 Extend this scaffold with retrieval/query handlers, agent loops, or additional knowledge graph relationships as your RAG workflows evolve.
+
+## Docker Deployment
+
+### Production Deployment
+
+The application includes a complete Docker Compose setup with all dependencies:
+
+```bash
+# Start everything
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Stop services
+docker compose down
+```
+
+**Included Services:**
+- **go-agent**: Main application with optimized multi-stage build
+- **postgres**: PostgreSQL 16 with pgvector extension
+- **neo4j**: Neo4j 5.24 Community Edition with APOC plugins
+- **ollama**: Local LLM inference engine (optional, can use OpenAI instead)
+
+### Development with Docker
+
+For local development, use the dev compose file to run only infrastructure:
+
+```bash
+# Start databases only
+docker compose -f docker-compose.dev.yml up -d
+
+# Run the Go app locally
+make serve
+```
+
+### Configuration
+
+Edit `.env` to configure services:
+- Switch between Ollama (local) and OpenAI (cloud) providers
+- Adjust database passwords and connection strings
+- Configure LLM and embedding models
+
+### Performance Optimizations
+
+The Docker setup includes several optimizations:
+- **Multi-stage builds**: Minimal final image size (~50MB for Go binary)
+- **Connection pooling**: Reused database connections across requests
+- **Health checks**: Automatic service dependency management
+- **Resource limits**: Tuned memory and CPU allocations
+- **Persistent volumes**: Data survives container restarts
+
+For detailed Docker documentation including troubleshooting, monitoring, and production best practices, see [DOCKER.md](DOCKER.md).

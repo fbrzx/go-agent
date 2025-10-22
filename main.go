@@ -300,10 +300,19 @@ func serveCmd(cfg config.Config, logger *log.Logger, args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	server := api.New(cfg, logger)
+	server, cleanup, err := api.New(cfg, logger)
+	if err != nil {
+		logger.Fatalf("initialize server: %v", err)
+	}
+	defer cleanup()
+
 	httpServer := &http.Server{
-		Addr:    *addr,
-		Handler: server,
+		Addr:              *addr,
+		Handler:           server,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	errCh := make(chan error, 1)

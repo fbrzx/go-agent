@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"github.com/fabfab/go-agent/chat"
@@ -30,10 +31,17 @@ const (
 
 // Server exposes HTTP handlers for the core go-agent workflows.
 type Server struct {
-	cfg     config.Config
-	logger  *log.Logger
-	handler http.Handler
+	cfg         config.Config
+	logger      *log.Logger
+	handler     http.Handler
+	pgPool      *pgxpool.Pool
+	neo4jDriver neo4j.DriverWithContext
+	embedder    embeddings.Embedder
+	llmClient   llm.StreamClient
 }
+
+// CleanupFunc is a function that cleans up server resources
+type CleanupFunc func()
 
 type messageResponse struct {
 	Message string `json:"message"`
@@ -125,14 +133,64 @@ type chatStreamFinal struct {
 }
 
 // New constructs a Server that serves the HTTP API using the provided configuration.
-func New(cfg config.Config, logger *log.Logger) *Server {
+// It initializes database connections that are reused across requests for better performance.
+// Returns the server and a cleanup function that should be called when shutting down.
+func New(cfg config.Config, logger *log.Logger) (*Server, CleanupFunc, error) {
 	if logger == nil {
 		logger = log.Default()
 	}
 
-	s := &Server{cfg: cfg, logger: logger}
+	ctx := context.Background()
+
+	// Initialize PostgreSQL connection pool
+	pgPool, err := database.NewPostgresPool(ctx, cfg.PostgresDSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("postgres connection: %w", err)
+	}
+
+	// Initialize Neo4j driver
+	neo4jDriver, err := database.NewNeo4jDriver(ctx, cfg.Neo4jURI, cfg.Neo4jUser, cfg.Neo4jPass)
+	if err != nil {
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("neo4j connection: %w", err)
+	}
+
+	// Initialize embedder
+	embedder, err := embeddings.NewEmbedder(cfg)
+	if err != nil {
+		neo4jDriver.Close(ctx)
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("embedder setup: %w", err)
+	}
+
+	// Initialize LLM client
+	llmClient, err := llm.NewClient(cfg)
+	if err != nil {
+		neo4jDriver.Close(ctx)
+		pgPool.Close()
+		return nil, nil, fmt.Errorf("llm setup: %w", err)
+	}
+
+	s := &Server{
+		cfg:         cfg,
+		logger:      logger,
+		pgPool:      pgPool,
+		neo4jDriver: neo4jDriver,
+		embedder:    embedder,
+		llmClient:   llmClient,
+	}
 	s.handler = s.routes()
-	return s
+
+	cleanup := func() {
+		if neo4jDriver != nil {
+			neo4jDriver.Close(ctx)
+		}
+		if pgPool != nil {
+			pgPool.Close()
+		}
+	}
+
+	return s, cleanup, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -422,27 +480,15 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("postgres connection: %w", err))
-		return
-	}
-	defer pgPool.Close()
-
-	if _, err := pgPool.Exec(ctx, "TRUNCATE rag_chunks, rag_documents"); err != nil {
+	// Use existing connection pool
+	if _, err := s.pgPool.Exec(ctx, "TRUNCATE rag_chunks, rag_documents"); err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("truncate postgres tables: %w", err))
 		return
 	}
 	s.logger.Println("cleared Postgres rag_documents and rag_chunks")
 
-	neo4jDriver, err := database.NewNeo4jDriver(ctx, s.cfg.Neo4jURI, s.cfg.Neo4jUser, s.cfg.Neo4jPass)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("neo4j connection: %w", err))
-		return
-	}
-	defer neo4jDriver.Close(ctx)
-
-	session := neo4jDriver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	// Use existing Neo4j driver
+	session := s.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 
 	if err := purgeNeo4j(ctx, session); err != nil {
@@ -504,67 +550,23 @@ func (s *Server) resolveLimit(limit int) int {
 }
 
 func (s *Server) buildIngestionService(ctx context.Context) (*ingestion.Service, func(), error) {
-	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
-	if err != nil {
-		return nil, nil, fmt.Errorf("postgres connection: %w", err)
-	}
+	// Reuse existing connections from the server
+	svc := ingestion.NewService(s.pgPool, s.neo4jDriver, s.embedder, s.logger, s.cfg.Embeddings.Dimension)
 
-	neo4jDriver, err := database.NewNeo4jDriver(ctx, s.cfg.Neo4jURI, s.cfg.Neo4jUser, s.cfg.Neo4jPass)
-	if err != nil {
-		pgPool.Close()
-		return nil, nil, fmt.Errorf("neo4j connection: %w", err)
-	}
-
-	embedder, err := embeddings.NewEmbedder(s.cfg)
-	if err != nil {
-		neo4jDriver.Close(ctx)
-		pgPool.Close()
-		return nil, nil, fmt.Errorf("embedder setup: %w", err)
-	}
-
-	svc := ingestion.NewService(pgPool, neo4jDriver, embedder, s.logger, s.cfg.Embeddings.Dimension)
-	cleanup := func() {
-		neo4jDriver.Close(ctx)
-		pgPool.Close()
-	}
+	// No cleanup needed as connections are managed by the server
+	cleanup := func() {}
 
 	return svc, cleanup, nil
 }
 
 func (s *Server) buildChatService(ctx context.Context) (*chat.Service, func(), error) {
-	pgPool, err := database.NewPostgresPool(ctx, s.cfg.PostgresDSN)
-	if err != nil {
-		return nil, nil, fmt.Errorf("postgres connection: %w", err)
-	}
+	// Reuse existing connections from the server
+	vectorStore := chat.NewPostgresVectorStore(s.pgPool)
+	graphStore := chat.NewNeo4jGraphStore(s.neo4jDriver)
+	svc := chat.NewService(vectorStore, graphStore, s.embedder, s.llmClient, s.logger)
 
-	neo4jDriver, err := database.NewNeo4jDriver(ctx, s.cfg.Neo4jURI, s.cfg.Neo4jUser, s.cfg.Neo4jPass)
-	if err != nil {
-		pgPool.Close()
-		return nil, nil, fmt.Errorf("neo4j connection: %w", err)
-	}
-
-	embedder, err := embeddings.NewEmbedder(s.cfg)
-	if err != nil {
-		neo4jDriver.Close(ctx)
-		pgPool.Close()
-		return nil, nil, fmt.Errorf("embedder setup: %w", err)
-	}
-
-	llmClient, err := llm.NewClient(s.cfg)
-	if err != nil {
-		neo4jDriver.Close(ctx)
-		pgPool.Close()
-		return nil, nil, fmt.Errorf("llm setup: %w", err)
-	}
-
-	vectorStore := chat.NewPostgresVectorStore(pgPool)
-	graphStore := chat.NewNeo4jGraphStore(neo4jDriver)
-	svc := chat.NewService(vectorStore, graphStore, embedder, llmClient, s.logger)
-
-	cleanup := func() {
-		neo4jDriver.Close(ctx)
-		pgPool.Close()
-	}
+	// No cleanup needed as connections are managed by the server
+	cleanup := func() {}
 
 	return svc, cleanup, nil
 }
