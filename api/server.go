@@ -140,7 +140,7 @@ func New(cfg config.Config, logger *log.Logger) (*Server, CleanupFunc, error) {
 		logger = log.Default()
 	}
 
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	// Initialize PostgreSQL connection pool
 	pgPool, err := database.NewPostgresPool(ctx, cfg.PostgresDSN)
@@ -182,8 +182,9 @@ func New(cfg config.Config, logger *log.Logger) (*Server, CleanupFunc, error) {
 	s.handler = s.routes()
 
 	cleanup := func() {
+		cleanupCtx := context.Background()
 		if neo4jDriver != nil {
-			neo4jDriver.Close(ctx)
+			neo4jDriver.Close(cleanupCtx)
 		}
 		if pgPool != nil {
 			pgPool.Close()
@@ -232,7 +233,9 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	w.Header().Set("Content-Disposition", "inline; filename=\"openapi.yaml\"")
-	_, _ = w.Write(openAPISpecYAML)
+	if _, err := w.Write(openAPISpecYAML); err != nil {
+		s.logger.Printf("failed to write openapi spec: %v", err)
+	}
 }
 
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
@@ -288,7 +291,11 @@ func (s *Server) handleIngestUpload(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, fmt.Errorf("document field is required: %w", err))
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			s.logger.Printf("failed to close uploaded file: %v", err)
+		}
+	}()
 
 	data, err := io.ReadAll(file)
 	if err != nil {
@@ -448,17 +455,24 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		return s.sendSSE(w, flusher, "chunk", chatStreamChunk{Content: chunk})
 	})
 	if err != nil {
-		_ = s.sendSSE(w, flusher, "error", errorResponse{Error: err.Error()})
+		if sseErr := s.sendSSE(w, flusher, "error", errorResponse{Error: err.Error()}); sseErr != nil {
+			s.logger.Printf("failed to send error event: %v", sseErr)
+		}
 		return
 	}
 
 	final := buildChatResponse(resp, updatedHistory)
-	_ = s.sendSSE(w, flusher, "final", chatStreamFinal{
+	if err := s.sendSSE(w, flusher, "final", chatStreamFinal{
 		Answer:  final.Answer,
 		Sources: final.Sources,
 		History: final.History,
-	})
-	_ = s.sendSSE(w, flusher, "done", messageResponse{Message: "complete"})
+	}); err != nil {
+		s.logger.Printf("failed to send final event: %v", err)
+		return
+	}
+	if err := s.sendSSE(w, flusher, "done", messageResponse{Message: "complete"}); err != nil {
+		s.logger.Printf("failed to send done event: %v", err)
+	}
 }
 
 func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
@@ -524,7 +538,9 @@ func decodeJSON(r *http.Request, dst any) error {
 	if r.Body == nil {
 		return nil
 	}
-	defer r.Body.Close()
+	defer func() {
+		_ = r.Body.Close() // Error is safe to ignore for request bodies
+	}()
 
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
