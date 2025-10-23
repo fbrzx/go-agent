@@ -1,0 +1,125 @@
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    build:
+      context: ./containers
+      dockerfile: Dockerfile
+    container_name: go-agent-postgres
+    environment:
+      POSTGRES_DB: go-agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mysecretpassword}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d go-agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - go-agent-network
+    restart: unless-stopped
+
+  # Neo4j graph database
+  neo4j:
+    image: neo4j:5.24-community
+    container_name: go-agent-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-mysecretpassword}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 1G
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+      NEO4J_server_default__advertised__address: neo4j
+      NEO4J_server_bolt_advertised__address: neo4j:7687
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - go-agent-network
+    restart: unless-stopped
+
+  # Go-Agent application
+  go-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-agent-app
+    environment:
+      # Database connections
+      POSTGRES_DSN: postgresql://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@postgres:5432/go-agent?sslmode=disable
+      NEO4J_URI: neo4j://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-mysecretpassword}
+
+      # Data directory
+      DATA_DIR: /app/documents
+
+      # LLM and Embedding providers (ollama or openai)
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+
+      # Ollama configuration
+      OLLAMA_HOST: ${OLLAMA_HOST_CONTAINER:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-llama3.1:8b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
+
+      # OpenAI configuration (optional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./documents:/app/documents:ro
+      - agent_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - go-agent-network
+    restart: unless-stopped
+
+networks:
+  go-agent-network:
+    driver: bridge
+    name: go-agent-network
+
+volumes:
+  postgres_data:
+    name: go-agent-postgres-data
+  neo4j_data:
+    name: go-agent-neo4j-data
+  neo4j_logs:
+    name: go-agent-neo4j-logs
+  neo4j_import:
+    name: go-agent-neo4j-import
+  neo4j_plugins:
+    name: go-agent-neo4j-plugins
+  agent_data:
+    name: go-agent-app-data

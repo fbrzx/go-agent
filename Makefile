@@ -8,7 +8,7 @@ CHAT_ARGS ?=
 CLEAR_ARGS ?=
 SERVE_ARGS ?=
 
-.PHONY: test build train chat clear serve
+.PHONY: test build train chat clear serve lint infra-up infra-down infra-status ci-local help
 
 ## test: Run Go tests under ./tests. Set INCLUDE_INTEGRATION=1 to enable integration checks.
 test:
@@ -66,3 +66,28 @@ serve:
 	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
 	   set +a; \
 	   go run . serve $(SERVE_ARGS) )
+
+## lint: Run all linting checks (Go + Frontend).
+lint:
+	@./scripts/lint.sh
+
+## infra-up: Start development infrastructure (PostgreSQL, Neo4j, Ollama).
+infra-up:
+	@./scripts/infra.sh up
+
+## infra-down: Stop development infrastructure.
+infra-down:
+	@./scripts/infra.sh down
+
+## infra-status: Check status of development infrastructure.
+infra-status:
+	@./scripts/infra.sh status
+
+## ci-local: Run full CI pipeline locally.
+ci-local:
+	@./scripts/ci-local.sh
+
+## help: Display this help message.
+help:
+	@echo "Available targets:"
+	@grep -E '^## ' Makefile | sed 's/^## /  /'

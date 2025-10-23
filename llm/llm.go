@@ -1,3 +1,4 @@
+// Package llm provides language model client interfaces for Ollama and OpenAI.
 package llm
 
 import (

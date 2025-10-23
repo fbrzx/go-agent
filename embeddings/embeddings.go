@@ -1,3 +1,4 @@
+// Package embeddings provides pluggable text embedding generation for Ollama and OpenAI.
 package embeddings
 
 import (

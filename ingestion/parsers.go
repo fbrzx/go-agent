@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	pdf "github.com/ledongthuc/pdf"
+	pdf "github.com/dslipak/pdf"
 )
 
 type DocumentParser interface {

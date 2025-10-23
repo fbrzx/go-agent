@@ -1,3 +1,4 @@
+// Package knowledge provides Neo4j graph database synchronization for document relationships.
 package knowledge
 
 import (

@@ -10,18 +10,27 @@
   --muted: #94a3b8;
   --text: #e2e8f0;
   --text-strong: #f8fafc;
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   background-color: var(--bg-alt);
   color: var(--text);
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: radial-gradient(circle at top, rgba(59, 130, 246, 0.15), transparent 55%), var(--bg-alt);
+  background:
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.15), transparent 55%), var(--bg-alt);
   min-height: 100vh;
 }
 
@@ -184,7 +193,9 @@ a {
   background: rgba(59, 130, 246, 0.08);
   font-size: 0.8rem;
   text-decoration: none;
-  transition: border-color 0.2s ease, color 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .source-item:hover {
@@ -211,7 +222,9 @@ a {
   color: var(--text);
   font: inherit;
   line-height: 1.5;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .composer textarea:focus {
@@ -229,7 +242,10 @@ a {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 10px 25px -15px var(--accent-strong);
-  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
 }
 
 .composer button:disabled {
@@ -266,7 +282,9 @@ a {
   background: rgba(15, 23, 42, 0.55);
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 600;
@@ -293,7 +311,9 @@ a {
   padding-left: 1rem;
   opacity: 1;
   transform: translateX(0);
-  transition: opacity 0.2s ease, transform 0.25s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.25s ease;
 }
 
 .sidebar.collapsed .sidebar-content {
@@ -326,7 +346,9 @@ a {
   display: grid;
   gap: 0.5rem;
   text-align: center;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
   cursor: pointer;
 }
 
@@ -339,7 +361,7 @@ a {
   color: var(--text-strong);
 }
 
-.upload-dropzone input[type="file"] {
+.upload-dropzone input[type='file'] {
   display: none;
 }
 
@@ -357,7 +379,9 @@ a {
   background: rgba(248, 250, 252, 0.05);
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .upload-button:hover {
@@ -399,15 +423,15 @@ a {
   align-items: center;
 }
 
-.upload-status[data-status="success"] {
+.upload-status[data-status='success'] {
   color: #34d399;
 }
 
-.upload-status[data-status="error"] {
+.upload-status[data-status='error'] {
   color: #fca5a5;
 }
 
-.upload-status[data-status="uploading"] {
+.upload-status[data-status='uploading'] {
   color: var(--accent);
 }
 
@@ -424,7 +448,10 @@ a {
   background: rgba(248, 250, 252, 0.07);
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.2s ease, background-color 0.2s ease, opacity 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    opacity 0.2s ease;
 }
 
 .secondary-button:hover {

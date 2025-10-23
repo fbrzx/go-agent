@@ -1,0 +1,14 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+build
+.vite
+
+# Coverage
+coverage
+
+# Misc
+*.min.js
+*.min.css

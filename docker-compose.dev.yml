@@ -1,0 +1,75 @@
+# Development Docker Compose - Infrastructure only
+# Use this to run databases locally while developing the Go app on your host machine
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    build:
+      context: ./containers
+      dockerfile: Dockerfile
+    container_name: go-agent-postgres-dev
+    environment:
+      POSTGRES_DB: go-agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mysecretpassword}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d go-agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - go-agent-dev-network
+
+  # Neo4j graph database
+  neo4j:
+    image: neo4j:5.24-community
+    container_name: go-agent-neo4j-dev
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-mysecretpassword}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 1G
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+      NEO4J_server_default__advertised__address: neo4j
+      NEO4J_server_bolt_advertised__address: neo4j:7687
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_dev_data:/data
+      - neo4j_dev_logs:/logs
+      - neo4j_dev_import:/var/lib/neo4j/import
+      - neo4j_dev_plugins:/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - go-agent-dev-network
+
+networks:
+  go-agent-dev-network:
+    driver: bridge
+    name: go-agent-dev-network
+
+volumes:
+  postgres_dev_data:
+    name: go-agent-postgres-dev-data
+  neo4j_dev_data:
+    name: go-agent-neo4j-dev-data
+  neo4j_dev_logs:
+    name: go-agent-neo4j-dev-logs
+  neo4j_dev_import:
+    name: go-agent-neo4j-dev-import
+  neo4j_dev_plugins:
+    name: go-agent-neo4j-dev-plugins

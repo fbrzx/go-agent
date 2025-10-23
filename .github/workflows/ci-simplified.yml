@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  GO_VERSION: '1.23.0'
+  GOTOOLCHAIN: 'local'  # Prevent automatic Go version upgrades
+
+jobs:
+  # Minimal build check - just verify the code compiles
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Verify Go modules
+        run: go mod verify
+
+      - name: Build Go application
+        run: |
+          mkdir -p bin
+          go build -v -o bin/go-agent .
+
+      - name: Run unit tests
+        run: go test -v -short ./...
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-agent-binary
+          path: bin/go-agent
+          retention-days: 7

@@ -1,0 +1,65 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Data directories
+documents/
+data/
+
+# Dependencies
+vendor/
+
+# Frontend
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# Logs
+*.log
+
+# Testing
+coverage.txt
+*.coverprofile
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+containers/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
