@@ -268,6 +268,10 @@ func clearCmd(cfg config.Config, logger *log.Logger, args []string) {
 	}
 	defer pgPool.Close()
 
+	if err := database.EnsureRAGSchema(ctx, pgPool, cfg.Embeddings.Dimension); err != nil {
+		logger.Fatalf("ensure postgres schema: %v", err)
+	}
+
 	if _, err := pgPool.Exec(ctx, "TRUNCATE rag_chunks, rag_documents"); err != nil {
 		logger.Fatalf("truncate postgres tables: %v", err)
 	}

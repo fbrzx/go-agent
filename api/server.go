@@ -495,6 +495,11 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	if err := database.EnsureRAGSchema(ctx, s.pgPool, s.cfg.Embeddings.Dimension); err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("ensure postgres schema: %w", err))
+		return
+	}
+
 	// Use existing connection pool
 	if _, err := s.pgPool.Exec(ctx, "TRUNCATE rag_chunks, rag_documents"); err != nil {
 		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("truncate postgres tables: %w", err))
