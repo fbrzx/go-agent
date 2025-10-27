@@ -297,48 +297,51 @@ const App: React.FC = () => {
     [submitQuestion]
   );
 
-  const handleFiles = useCallback((fileList: FileList | File[]) => {
-    const files = Array.from(fileList);
-    if (!files.length) {
-      return;
-    }
-    setUploads(previous => {
-      const existingKeys = new Set(previous.map(entry => `${entry.name}:${entry.size}`));
-      const nextEntries: UploadEntry[] = [];
-
-      files.forEach(file => {
-        if (!isSupportedFile(file.name)) {
-          pushToast(`${file.name} is not a supported format.`, 'error');
-          return;
-        }
-        const key = `${file.name}:${file.size}`;
-        if (
-          existingKeys.has(key) ||
-          nextEntries.some(entry => `${entry.name}:${entry.size}` === key)
-        ) {
-          pushToast(`${file.name} is already queued.`, 'default');
-          return;
-        }
-
-        nextEntries.push({
-          id: createId(),
-          name: file.name,
-          size: file.size,
-          status: 'pending',
-          file,
-        });
-      });
-
-      if (nextEntries.length === 0) {
-        return previous;
+  const handleFiles = useCallback(
+    (fileList: FileList | File[]) => {
+      const files = Array.from(fileList);
+      if (!files.length) {
+        return;
       }
-      pushToast(
-        `${nextEntries.length} file${nextEntries.length > 1 ? 's' : ''} queued for processing.`,
-        'success'
-      );
-      return [...previous, ...nextEntries];
-    });
-  }, [pushToast]);
+      setUploads(previous => {
+        const existingKeys = new Set(previous.map(entry => `${entry.name}:${entry.size}`));
+        const nextEntries: UploadEntry[] = [];
+
+        files.forEach(file => {
+          if (!isSupportedFile(file.name)) {
+            pushToast(`${file.name} is not a supported format.`, 'error');
+            return;
+          }
+          const key = `${file.name}:${file.size}`;
+          if (
+            existingKeys.has(key) ||
+            nextEntries.some(entry => `${entry.name}:${entry.size}` === key)
+          ) {
+            pushToast(`${file.name} is already queued.`, 'default');
+            return;
+          }
+
+          nextEntries.push({
+            id: createId(),
+            name: file.name,
+            size: file.size,
+            status: 'pending',
+            file,
+          });
+        });
+
+        if (nextEntries.length === 0) {
+          return previous;
+        }
+        pushToast(
+          `${nextEntries.length} file${nextEntries.length > 1 ? 's' : ''} queued for processing.`,
+          'success'
+        );
+        return [...previous, ...nextEntries];
+      });
+    },
+    [pushToast]
+  );
 
   useEffect(() => {
     if (activeUploadId) {
@@ -595,10 +598,7 @@ const App: React.FC = () => {
                   <strong>{isDragging ? dropZoneText.dragging : dropZoneText.idle}</strong>
                   <span>Markdown (.md, .markdown) supported</span>
                   <div className="upload-actions">
-                    <button
-                      type="button"
-                      className="upload-button"
-                    >
+                    <button type="button" className="upload-button">
                       Browse files
                     </button>
                     <input
