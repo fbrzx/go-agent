@@ -10,13 +10,14 @@ echo "=================================="
 # Check if golangci-lint is installed
 if ! command -v golangci-lint &> /dev/null; then
     echo "Installing golangci-lint..."
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.61.0
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.6
     export PATH=$PATH:$(go env GOPATH)/bin
 fi
 
 echo ""
 echo "1. Running golangci-lint..."
-golangci-lint run --timeout 5m ./...
+PACKAGE_DIRS=$(go list -f '{{.Dir}}' ./...)
+golangci-lint run --modules-download-mode=mod --timeout 5m ${PACKAGE_DIRS}
 
 echo ""
 echo "2. Checking Go formatting..."

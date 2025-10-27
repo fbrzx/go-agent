@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	neo4jconfig "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
 )
 
 // NewPostgresPool creates a new PostgreSQL connection pool with optimized settings
@@ -40,7 +41,7 @@ func NewPostgresPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 
 // NewNeo4jDriver creates a new Neo4j driver with optimized settings
 func NewNeo4jDriver(ctx context.Context, uri, user, password string) (neo4j.DriverWithContext, error) {
-	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(user, password, ""), func(config *neo4j.Config) {
+	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(user, password, ""), func(config *neo4jconfig.Config) {
 		config.MaxConnectionPoolSize = 50
 		config.MaxConnectionLifetime = 1 * time.Hour
 		config.ConnectionAcquisitionTimeout = 60 * time.Second

@@ -63,9 +63,7 @@ function isSupportedFile(name: string) {
   const lower = name.toLowerCase();
   return (
     lower.endsWith('.md') ||
-    lower.endsWith('.markdown') ||
-    lower.endsWith('.pdf') ||
-    lower.endsWith('.csv')
+    lower.endsWith('.markdown')
   );
 }
 
@@ -97,6 +95,7 @@ const App: React.FC = () => {
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadAbortController = useRef<AbortController | null>(null);
+  const processingUploadId = useRef<string | null>(null);
 
   const scrollToBottom = useCallback(() => {
     const container = messageListRef.current;
@@ -109,11 +108,16 @@ const App: React.FC = () => {
   }, []);
 
   const pushToast = useCallback((message: string, tone: ToastTone = 'default') => {
-    const id = createId();
-    setToasts(prev => [...prev, { id, message, tone }]);
-    window.setTimeout(() => {
-      setToasts(prev => prev.filter(toast => toast.id !== id));
-    }, toastDuration);
+    setToasts(prev => {
+      if (prev.some(toast => toast.message === message && toast.tone === tone)) {
+        return prev;
+      }
+      const id = createId();
+      window.setTimeout(() => {
+        setToasts(current => current.filter(toast => toast.id !== id));
+      }, toastDuration);
+      return [...prev, { id, message, tone }];
+    });
   }, []);
 
   const appendMessage = useCallback(
@@ -296,55 +300,48 @@ const App: React.FC = () => {
     [submitQuestion]
   );
 
-  const handleFiles = useCallback(
-    (fileList: FileList | File[]) => {
-      const files = Array.from(fileList);
-      if (!files.length) {
-        return;
-      }
-      setUploads(previous => {
-        const existingKeys = new Set(previous.map(entry => `${entry.name}:${entry.size}`));
-        const nextEntries: UploadEntry[] = [];
+  const handleFiles = useCallback((fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    if (!files.length) {
+      return;
+    }
+    setUploads(previous => {
+      const existingKeys = new Set(previous.map(entry => `${entry.name}:${entry.size}`));
+      const nextEntries: UploadEntry[] = [];
 
-        files.forEach(file => {
-          if (!isSupportedFile(file.name)) {
-            pushToast(`${file.name} is not a supported format.`, 'error');
-            return;
-          }
-          const key = `${file.name}:${file.size}`;
-          if (
-            existingKeys.has(key) ||
-            nextEntries.some(entry => `${entry.name}:${entry.size}` === key)
-          ) {
-            pushToast(`${file.name} is already queued.`, 'default');
-            return;
-          }
-
-          nextEntries.push({
-            id: createId(),
-            name: file.name,
-            size: file.size,
-            status: 'pending',
-            file,
-          });
-        });
-
-        if (nextEntries.length === 0) {
-          return previous;
+      files.forEach(file => {
+        if (!isSupportedFile(file.name)) {
+          pushToast(`${file.name} is not a supported format.`, 'error');
+          return;
         }
-        pushToast(
-          `${nextEntries.length} file${nextEntries.length > 1 ? 's' : ''} queued for processing.`,
-          'success'
-        );
-        return [...previous, ...nextEntries];
+        const key = `${file.name}:${file.size}`;
+        if (
+          existingKeys.has(key) ||
+          nextEntries.some(entry => `${entry.name}:${entry.size}` === key)
+        ) {
+          pushToast(`${file.name} is already queued.`, 'default');
+          return;
+        }
+
+        nextEntries.push({
+          id: createId(),
+          name: file.name,
+          size: file.size,
+          status: 'pending',
+          file,
+        });
       });
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (nextEntries.length === 0) {
+        return previous;
       }
-    },
-    [pushToast]
-  );
+      pushToast(
+        `${nextEntries.length} file${nextEntries.length > 1 ? 's' : ''} queued for processing.`,
+        'success'
+      );
+      return [...previous, ...nextEntries];
+    });
+  }, [pushToast]);
 
   useEffect(() => {
     if (activeUploadId) {
@@ -354,10 +351,14 @@ const App: React.FC = () => {
     if (!pending) {
       return;
     }
+    if (processingUploadId.current === pending.id) {
+      return;
+    }
 
     const controller = new AbortController();
     uploadAbortController.current = controller;
     const { file, id, name } = pending;
+    processingUploadId.current = id;
 
     const ingestFile = async () => {
       setActiveUploadId(id);
@@ -420,6 +421,9 @@ const App: React.FC = () => {
       } finally {
         setActiveUploadId(null);
         uploadAbortController.current = null;
+        if (processingUploadId.current === id) {
+          processingUploadId.current = null;
+        }
       }
     };
 
@@ -490,8 +494,8 @@ const App: React.FC = () => {
           <div>
             <h1 className="app-title">Memory</h1>
             <p className="app-subtitle">
-              Chat with your Markdown, PDF, and CSV sources. Upload new knowledge directly into your
-              retrieval index.
+              Chat with your Markdown sources. Upload new knowledge directly into your retrieval
+              index.
             </p>
           </div>
           <div className="session-actions">
@@ -592,12 +596,11 @@ const App: React.FC = () => {
                   onDrop={handleDrop}
                 >
                   <strong>{isDragging ? dropZoneText.dragging : dropZoneText.idle}</strong>
-                  <span>Markdown (.md), PDF (.pdf) and CSV (.csv) supported</span>
+                  <span>Markdown (.md, .markdown) supported</span>
                   <div className="upload-actions">
                     <button
                       type="button"
                       className="upload-button"
-                      onClick={() => fileInputRef.current?.click()}
                     >
                       Browse files
                     </button>
@@ -608,10 +611,12 @@ const App: React.FC = () => {
                       type="file"
                       name="documents"
                       multiple
-                      accept=".md,.markdown,.pdf,.csv"
+                      accept=".md,.markdown"
                       onChange={event => {
                         if (event.target.files) {
                           handleFiles(event.target.files);
+                          // Reset so selecting the same file again still fires a change event
+                          event.target.value = '';
                         }
                       }}
                     />

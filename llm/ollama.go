@@ -56,10 +56,7 @@ func (c *ollamaClient) Generate(ctx context.Context, messages []Message) (string
 		Stream: false,
 	}
 
-	payload.Messages = make([]ollamaChatMessage, len(messages))
-	for i, msg := range messages {
-		payload.Messages[i] = ollamaChatMessage{Role: msg.Role, Content: msg.Content}
-	}
+	payload.Messages = toOllamaMessages(messages)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -79,7 +76,10 @@ func (c *ollamaClient) Generate(ctx context.Context, messages []Message) (string
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(resp.Body)
+		data, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", fmt.Errorf("read ollama chat error body: %w", readErr)
+		}
 		if len(data) > 0 {
 			return "", fmt.Errorf("ollama chat API error: %s", string(data))
 		}
@@ -104,10 +104,7 @@ func (c *ollamaClient) GenerateStream(ctx context.Context, messages []Message, f
 		Stream: true,
 	}
 
-	payload.Messages = make([]ollamaChatMessage, len(messages))
-	for i, msg := range messages {
-		payload.Messages[i] = ollamaChatMessage{Role: msg.Role, Content: msg.Content}
-	}
+	payload.Messages = toOllamaMessages(messages)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -127,7 +124,10 @@ func (c *ollamaClient) GenerateStream(ctx context.Context, messages []Message, f
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(resp.Body)
+		data, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("read ollama chat error body: %w", readErr)
+		}
 		if len(data) > 0 {
 			return fmt.Errorf("ollama chat API error: %s", string(data))
 		}
@@ -158,4 +158,15 @@ func (c *ollamaClient) GenerateStream(ctx context.Context, messages []Message, f
 			return nil
 		}
 	}
+}
+
+func toOllamaMessages(messages []Message) []ollamaChatMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	converted := make([]ollamaChatMessage, len(messages))
+	for i := range messages {
+		converted[i] = ollamaChatMessage(messages[i])
+	}
+	return converted
 }

@@ -1,6 +1,6 @@
 # go-agent
 
-Agentic RAG scaffold for experimenting with Markdown, PDF, and CSV knowledge bases. The project ingests `.md`, `.pdf`, and `.csv` files, chunks and embeds their contents into Postgres (with pgvector), and mirrors the knowledge structure inside Neo4j. Embedding generation is pluggable so you can point the pipeline at local Ollama models or hosted OpenAI APIs.
+Agentic RAG scaffold for experimenting with Markdown, PDF, and CSV knowledge bases. The project ingests `.md` files, chunks and embeds their contents into Postgres (with pgvector), and mirrors the knowledge structure inside Neo4j. Embedding generation is pluggable so you can point the pipeline at local Ollama models or hosted OpenAI APIs.
 
 ## Quick Start with Docker (Recommended)
 
@@ -10,7 +10,7 @@ The easiest way to get started is using Docker Compose, which sets up all depend
 # 1. Copy environment configuration
 cp .env.docker .env
 
-# 2. Start all services (PostgreSQL, Neo4j, Ollama, and the app)
+# 2. Start 
 docker compose up -d
 
 # 3. Wait for initialization (5-10 minutes for first run)

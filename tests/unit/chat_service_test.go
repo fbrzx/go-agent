@@ -17,7 +17,7 @@ type stubEmbedder struct {
 	err     error
 }
 
-func (s *stubEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (s *stubEmbedder) Embed(_ context.Context, _ []string) ([][]float32, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -34,7 +34,7 @@ type stubVectorStore struct {
 	err     error
 }
 
-func (s *stubVectorStore) SimilarChunks(ctx context.Context, embedding []float32, limit int) ([]chat.ChunkResult, error) {
+func (s *stubVectorStore) SimilarChunks(_ context.Context, _ []float32, _ int) ([]chat.ChunkResult, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -48,7 +48,7 @@ type stubGraphStore struct {
 	err  error
 }
 
-func (s *stubGraphStore) DocumentInsights(ctx context.Context, docIDs []string) (map[string]chat.DocumentInsight, error) {
+func (s *stubGraphStore) DocumentInsights(_ context.Context, _ []string) (map[string]chat.DocumentInsight, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -65,7 +65,7 @@ type stubLLM struct {
 	err    error
 }
 
-func (s *stubLLM) Generate(ctx context.Context, messages []llm.Message) (string, error) {
+func (s *stubLLM) Generate(_ context.Context, messages []llm.Message) (string, error) {
 	if s.err != nil {
 		return "", s.err
 	}

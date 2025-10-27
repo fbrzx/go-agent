@@ -162,7 +162,7 @@ func firstNonEmptyLine(content string) string {
 
 func formatCSVRow(headers, row []string, idx int) string {
 	builder := &strings.Builder{}
-	builder.WriteString(fmt.Sprintf("Row %d", idx+1))
+	fmt.Fprintf(builder, "Row %d", idx+1)
 	if len(headers) > 0 {
 		builder.WriteString("\n")
 	}
@@ -176,9 +176,10 @@ func formatCSVRow(headers, row []string, idx int) string {
 		header := strings.TrimSpace(headers[i])
 		value := strings.TrimSpace(row[i])
 		if header == "" {
-			header = fmt.Sprintf("Column %d", i+1)
+			fmt.Fprintf(builder, "Column %d", i+1)
+		} else {
+			builder.WriteString(header)
 		}
-		builder.WriteString(header)
 		builder.WriteString(": ")
 		builder.WriteString(value)
 		if i < limit-1 {
@@ -189,8 +190,7 @@ func formatCSVRow(headers, row []string, idx int) string {
 	// Append any remaining values beyond the headers count.
 	if len(row) > len(headers) {
 		for i := len(headers); i < len(row); i++ {
-			builder.WriteString("\n")
-			builder.WriteString(fmt.Sprintf("Extra %d: %s", i+1, strings.TrimSpace(row[i])))
+			fmt.Fprintf(builder, "\nExtra %d: %s", i+1, strings.TrimSpace(row[i]))
 		}
 	}
 

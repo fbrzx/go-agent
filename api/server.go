@@ -128,9 +128,7 @@ type chatStreamChunk struct {
 }
 
 type chatStreamFinal struct {
-	Answer  string           `json:"answer"`
-	Sources []chatSource     `json:"sources"`
-	History []messagePayload `json:"history"`
+	chatResponse
 }
 
 // New constructs a Server that serves the HTTP API using the provided configuration.
@@ -463,11 +461,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	final := buildChatResponse(resp, updatedHistory)
-	if err := s.sendSSE(w, flusher, "final", chatStreamFinal{
-		Answer:  final.Answer,
-		Sources: final.Sources,
-		History: final.History,
-	}); err != nil {
+	if err := s.sendSSE(w, flusher, "final", chatStreamFinal{chatResponse: final}); err != nil {
 		s.logger.Printf("failed to send final event: %v", err)
 		return
 	}
@@ -639,7 +633,8 @@ func buildSources(sources []chat.Source) []chatSource {
 		return nil
 	}
 	converted := make([]chatSource, len(sources))
-	for i, src := range sources {
+	for i := range sources {
+		src := sources[i]
 		converted[i] = chatSource{
 			DocumentID: src.DocumentID,
 			Title:      src.Title,
