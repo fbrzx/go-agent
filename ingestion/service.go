@@ -260,6 +260,10 @@ func (s *Service) PersistDocument(ctx context.Context, result *DocumentResult, f
 		return 0, fmt.Errorf("document result is nil")
 	}
 
+	if err := database.EnsureRAGSchema(ctx, s.pool, s.dimension); err != nil {
+		return 0, fmt.Errorf("ensure schema: %w", err)
+	}
+
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)

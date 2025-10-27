@@ -2,7 +2,7 @@ run:
   timeout: 5m
   issues-exit-code: 1
   tests: true
-  modules-download-mode: readonly
+  modules-download-mode: mod
 
 linters:
   enable:
@@ -89,6 +89,7 @@ linters-settings:
     checks: ["all"]
 
 issues:
+  uniq-by-line: true
   exclude-rules:
     # Exclude some linters from running on tests files
     - path: _test\.go
@@ -108,8 +109,8 @@ issues:
   new: false
 
 output:
-  formats: [colored-line-number]
+  formats:
+    - format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
-  uniq-by-line: true
   sort-results: true

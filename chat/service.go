@@ -199,14 +199,18 @@ func (s *Service) chat(
 }
 
 func mergeSources(chunks []ChunkResult, insights map[string]DocumentInsight) []Source {
-	grouped := make(map[string]Source)
-	for _, chunk := range chunks {
-		source := grouped[chunk.DocumentID]
-		if source.DocumentID == "" {
-			source.DocumentID = chunk.DocumentID
-			source.Title = chunk.Title
-			source.Path = chunk.Path
-			source.Score = chunk.Score
+	grouped := make(map[string]*Source, len(chunks))
+	for i := range chunks {
+		chunk := chunks[i]
+		source, ok := grouped[chunk.DocumentID]
+		if !ok {
+			source = &Source{
+				DocumentID: chunk.DocumentID,
+				Title:      chunk.Title,
+				Path:       chunk.Path,
+				Score:      chunk.Score,
+			}
+			grouped[chunk.DocumentID] = source
 		} else if chunk.Score > source.Score {
 			source.Score = chunk.Score
 		}
@@ -224,13 +228,11 @@ func mergeSources(chunks []ChunkResult, insights map[string]DocumentInsight) []S
 		if insight, ok := insights[chunk.DocumentID]; ok {
 			source.Insight = insight
 		}
-
-		grouped[chunk.DocumentID] = source
 	}
 
 	sources := make([]Source, 0, len(grouped))
 	for _, src := range grouped {
-		sources = append(sources, src)
+		sources = append(sources, *src)
 	}
 
 	sort.Slice(sources, func(i, j int) bool {
@@ -242,14 +244,16 @@ func mergeSources(chunks []ChunkResult, insights map[string]DocumentInsight) []S
 
 func buildContextPrompt(sources []Source) string {
 	var sb strings.Builder
-	for idx, source := range sources {
+	for idx := range sources {
+		source := &sources[idx]
 		sb.WriteString(fmt.Sprintf("Source %d: %s (%s)\n", idx+1, source.Title, source.Path))
 		if source.Insight.ChunkCount > 0 {
 			sb.WriteString(fmt.Sprintf("Chunks indexed: %d\n", source.Insight.ChunkCount))
 		}
 		if len(source.Insight.Sections) > 0 {
 			var parts []string
-			for _, section := range source.Insight.Sections {
+			for i := range source.Insight.Sections {
+				section := source.Insight.Sections[i]
 				if section.Title == "" {
 					continue
 				}
@@ -267,7 +271,8 @@ func buildContextPrompt(sources []Source) string {
 		}
 		if len(source.Insight.RelatedDocuments) > 0 {
 			sb.WriteString("Related documents:\n")
-			for _, related := range source.Insight.RelatedDocuments {
+			for i := range source.Insight.RelatedDocuments {
+				related := source.Insight.RelatedDocuments[i]
 				weightInfo := ""
 				if related.Weight > 0 {
 					weightInfo = fmt.Sprintf(" weight %.2f", related.Weight)
@@ -321,7 +326,8 @@ func filterChunksBySections(chunks []ChunkResult, filters []string) []ChunkResul
 	}
 
 	filtered := make([]ChunkResult, 0, len(chunks))
-	for _, chunk := range chunks {
+	for i := range chunks {
+		chunk := chunks[i]
 		sectionTitle := strings.ToLower(strings.TrimSpace(chunk.SectionTitle))
 		if sectionTitle == "" {
 			sectionTitle = "introduction"
@@ -344,13 +350,14 @@ func filterSourcesByTopics(sources []Source, filters []string) []Source {
 	}
 
 	filtered := make([]Source, 0, len(sources))
-	for _, source := range sources {
+	for i := range sources {
+		source := &sources[i]
 		topics := make([]string, len(source.Insight.Topics))
-		for i, topic := range source.Insight.Topics {
-			topics[i] = strings.ToLower(strings.TrimSpace(topic))
+		for j, topic := range source.Insight.Topics {
+			topics[j] = strings.ToLower(strings.TrimSpace(topic))
 		}
 		if containsAny(topics, normalized) {
-			filtered = append(filtered, source)
+			filtered = append(filtered, *source)
 		}
 	}
 	return filtered
@@ -367,7 +374,7 @@ func normalizeFilters(filters []string) []string {
 	return result
 }
 
-func containsAny(values []string, filters []string) bool {
+func containsAny(values, filters []string) bool {
 	valueSet := make(map[string]struct{}, len(values))
 	for _, v := range values {
 		valueSet[v] = struct{}{}

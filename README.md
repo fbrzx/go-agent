@@ -1,6 +1,6 @@
 # go-agent
 
-Agentic RAG scaffold for experimenting with Markdown, PDF, and CSV knowledge bases. The project ingests `.md`, `.pdf`, and `.csv` files, chunks and embeds their contents into Postgres (with pgvector), and mirrors the knowledge structure inside Neo4j. Embedding generation is pluggable so you can point the pipeline at local Ollama models or hosted OpenAI APIs.
+Agentic RAG scaffold for experimenting with Markdown knowledge bases. The project ingests `.md` files, chunks and embeds their contents into Postgres (with pgvector), and mirrors the knowledge structure inside Neo4j. Embedding generation is pluggable so you can point the pipeline at local Ollama models or hosted OpenAI APIs.
 
 ## Quick Start with Docker (Recommended)
 
@@ -42,7 +42,7 @@ All runtime settings can be stored in `.env` (already git-ignored). Defaults fav
 | `NEO4J_URI` | `neo4j://localhost:7687` | Neo4j Bolt endpoint |
 | `NEO4J_USERNAME` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | `password` | Neo4j password |
-| `DATA_DIR` | `./documents` | Where Markdown/PDF/CSV sources live |
+| `DATA_DIR` | `./documents` | Where Markdown sources live |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama HTTP endpoint |
 | `LLM_PROVIDER` | `ollama` (`ollama`\|`openai`) | Conversational model provider |
 | `LLM_MODEL` | `llama3.1:8b` | Chat/agent model name |
@@ -66,7 +66,7 @@ set +a
    ```sh
    make build
    ```
-2. Place Markdown, PDF, or CSV documents in the directory configured by `DATA_DIR` (default `./documents`).
+2. Place Markdown documents in the directory configured by `DATA_DIR` (default `./documents`).
 3. Run the ingestion pipeline:
    ```sh
    make train
@@ -88,7 +88,7 @@ set +a
 
 Behind the scenes the command:
 - Ensures the `vector` extension and RAG tables exist in Postgres.
-- Splits Markdown, PDF, and CSV content into overlapping chunks tailored to each format.
+- Splits Markdown content into overlapping chunks tailored to the format.
 - Generates embeddings through the configured provider.
 - Stores vectors inside `rag_chunks` and mirrors document/chunk relationships in Neo4j.
 - Captures folder hierarchy and cross-document relationships inside Neo4j for richer retrieval context.

@@ -3,15 +3,59 @@ ENV_FILE ?= .env
 TEST_PKGS := ./tests/...
 INCLUDE_INTEGRATION ?= 0
 BINARY := go-agent
-TRAIN_ARGS ?=
-CHAT_ARGS ?=
 CLEAR_ARGS ?=
 SERVE_ARGS ?=
 
-.PHONY: test build train chat clear serve lint infra-up infra-down infra-status ci-local help
+.PHONY: test run deps deps-go deps-ui build go-test clear serve lint infra-up infra-down infra-status ci-local help
 
-## test: Run Go tests under ./tests. Set INCLUDE_INTEGRATION=1 to enable integration checks.
-test:
+## test: Install dependencies, lint, build, and run tests. Set INCLUDE_INTEGRATION=1 to enable integration checks.
+test: deps lint build go-test
+	@echo "Test pipeline complete"
+
+## run: Install dependencies, start infrastructure, and run API + UI dev servers.
+run: deps
+	@$(MAKE) infra-up
+	@echo "Starting development servers (Ctrl+C to stop)"
+	@( cleanup() { \
+	        echo ""; \
+	        echo "Stopping development servers"; \
+	        if [ -n "$$GO_PID" ]; then kill "$$GO_PID" 2>/dev/null || true; fi; \
+	        if [ -n "$$UI_PID" ]; then kill "$$UI_PID" 2>/dev/null || true; fi; \
+	        if [ -n "$$GO_PID$$UI_PID" ]; then wait "$$GO_PID" "$$UI_PID" 2>/dev/null || true; fi; \
+	    }; \
+	    GO_PID=""; \
+	    UI_PID=""; \
+	    trap cleanup INT TERM EXIT; \
+	    (cd ui && npm run dev) & \
+	    UI_PID=$$!; \
+	    ( set -a; \
+	      [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
+	      set +a; \
+	      go run . serve $(SERVE_ARGS) ) & \
+	    GO_PID=$$!; \
+	    wait "$$GO_PID" "$$UI_PID" )
+
+## deps-go: Download Go module dependencies.
+deps-go:
+	@echo "Fetching Go dependencies"
+	go mod download
+
+## deps-ui: Install frontend dependencies.
+deps-ui:
+	@echo "Installing UI dependencies"
+	cd ui && npm install
+
+## deps: Install all project dependencies (Go + UI).
+deps: deps-go deps-ui
+
+## build: Download modules and build the go-agent binary.
+build:
+	@echo "Building $(BINARY)"
+	@mkdir -p bin
+	go build -o bin/$(BINARY) .
+
+## go-test: Run Go tests under ./tests. Set INCLUDE_INTEGRATION=1 to enable integration checks.
+go-test:
 	@if [ "$(INCLUDE_INTEGRATION)" = "1" ]; then \
 		echo "Running tests in $(TEST_PKGS) (integration enabled)"; \
 	else \
@@ -25,29 +69,6 @@ test:
 	   else \
 	       go test $(TEST_PKGS); \
 	   fi )
-
-## build: Download modules and build the go-agent binary.
-build:
-	@echo "Tidying modules and building $(BINARY)"
-	go mod tidy
-	@mkdir -p bin
-	go build -o bin/$(BINARY) .
-
-## train: Execute the ingestion command, sourcing variables from $(ENV_FILE) if present.
-ingest:
-	@echo "Running $(BINARY) document ingestion"
-	@( set -a; \
-	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
-	   set +a; \
-	   go run . ingest $(TRAIN_ARGS) )
-
-## chat: Execute the chat command, sourcing variables from $(ENV_FILE) if present.
-chat:
-	@echo "Running $(BINARY) chat"
-	@( set -a; \
-	   [ -f "$(ENV_FILE)" ] && . "$(ENV_FILE)"; \
-	   set +a; \
-	   go run . chat $(CHAT_ARGS) )
 
 ## clear: Remove ingested data from Postgres and Neo4j. Set CONFIRM=1 to skip the prompt.
 clear:

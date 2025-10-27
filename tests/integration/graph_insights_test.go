@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"github.com/fabfab/go-agent/chat"
 	"github.com/fabfab/go-agent/config"
 	"github.com/fabfab/go-agent/knowledge"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
 func TestGraphInsightsIncludesFoldersAndRelatedDocs(t *testing.T) {

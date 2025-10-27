@@ -188,7 +188,8 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 				fmt.Printf("Filters (topics): %s\n", strings.Join(topicFilters.values, ", "))
 			}
 			fmt.Println("Sources:")
-			for idx, source := range resp.Sources {
+			for idx := range resp.Sources {
+				source := &resp.Sources[idx]
 				fmt.Printf("%d. %s (%s)\n", idx+1, source.Title, source.Path)
 				if source.Insight.ChunkCount > 0 {
 					fmt.Printf("   Indexed chunks: %d\n", source.Insight.ChunkCount)
@@ -198,7 +199,8 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 				}
 				if len(source.Insight.Sections) > 0 {
 					sectionParts := make([]string, 0, len(source.Insight.Sections))
-					for _, section := range source.Insight.Sections {
+					for i := range source.Insight.Sections {
+						section := source.Insight.Sections[i]
 						if section.Title == "" {
 							continue
 						}
@@ -213,7 +215,8 @@ func chatCmd(cfg config.Config, logger *log.Logger, args []string) {
 				}
 				if len(source.Insight.RelatedDocuments) > 0 {
 					fmt.Println("   Related documents:")
-					for _, related := range source.Insight.RelatedDocuments {
+					for i := range source.Insight.RelatedDocuments {
+						related := source.Insight.RelatedDocuments[i]
 						extra := ""
 						if related.Weight > 0 {
 							extra += fmt.Sprintf(" weight %.2f", related.Weight)

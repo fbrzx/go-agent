@@ -149,19 +149,28 @@ func convertRelated(value any) ([]RelatedDocument, error) {
 		if !ok {
 			continue
 		}
-		id, _ := data["id"].(string)
-		title, _ := data["title"].(string)
-		path, _ := data["path"].(string)
-		if id == "" {
+		id, ok := data["id"].(string)
+		if !ok || id == "" {
 			continue
 		}
 		if _, exists := seen[id]; exists {
 			continue
 		}
 		seen[id] = struct{}{}
+		title := ""
+		if v, ok := data["title"].(string); ok {
+			title = v
+		}
+		path := ""
+		if v, ok := data["path"].(string); ok {
+			path = v
+		}
 		weight, _ := toFloat(data["weight"])
 		similarity, _ := toFloat(data["similarity"])
-		reason, _ := data["reason"].(string)
+		var reason string
+		if r, ok := data["reason"].(string); ok {
+			reason = r
+		}
 		related = append(related, RelatedDocument{ID: id, Title: title, Path: path, Weight: weight, Similarity: similarity, Reason: reason})
 	}
 
@@ -180,12 +189,12 @@ func convertSections(value any) []SectionInfo {
 		if !ok {
 			continue
 		}
-		title, _ := data["title"].(string)
-		level, _ := toInt(data["level"])
-		order, _ := toInt(data["order"])
-		if title == "" {
+		title, ok := data["title"].(string)
+		if !ok || title == "" {
 			continue
 		}
+		level, _ := toInt(data["level"])
+		order, _ := toInt(data["order"])
 		sections = append(sections, SectionInfo{Title: title, Level: level, Order: order})
 	}
 
